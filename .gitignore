@@ -1,3 +1,5 @@
 *.csv
 /Trace_Collector/Task_Trace.ipynb
 /iblinkinfo.txt
+__pycache__
+.idea
