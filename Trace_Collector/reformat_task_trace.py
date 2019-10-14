@@ -8,16 +8,19 @@ def process_tasks(taskRawFile, taskCsvFile):
     for line in open(taskRawFile):
         jobInfo = line.rstrip('\n').split('|')
         id = jobInfo[0]
-        submitTime = jobInfo[8]
-        startTime = jobInfo[9]
-        endTime = jobInfo[10]
+        try:
+            submitTime = jobInfo[10]
+            startTime = jobInfo[11]
+            endTime = jobInfo[12]
+        except:
+            continue
         if '.' in id:
             continue
-        if submitTime == 'Unknown' or startTime == 'Unknown': # or endTime == 'Unknown':
+        if submitTime == 'Unknown' or startTime == 'Unknown': #or endTime == 'Unknown':
             continue
         gpuNum = 0
         try:
-            gpuNum = int(jobInfo[4].split(':')[1])
+            gpuNum = int(jobInfo[6].split(':')[1])
         except Exception:
             pass
         jobInfo.append(gpuNum)
@@ -37,8 +40,8 @@ def process_tasks(taskRawFile, taskCsvFile):
         jobInfoList += jobInfo
         jobInfoList += '\n'
 
-    with open(taskCsvFile, 'a') as f:
-        print >> f, jobInfoList
+    with open(taskCsvFile, 'w') as f:
+        print(jobInfoList, file=f)
 
 if __name__== "__main__":
     process_tasks('tasks.txt', 'tasks.csv')

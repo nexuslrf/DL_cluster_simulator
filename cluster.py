@@ -120,22 +120,23 @@ class Switch:
         # @TODO consider ps-worker network load!
         need_node = job['num_node']
         if need_node == 1:  # non-distributed
-            ret = self.try_single_node_alloc(job)
+            done, ret_gpu, ret_cpu = self.try_single_node_alloc(job)
         elif need_node > 1:
-            ret = self.try_cross_node_alloc(job)
+            done, ret_gpu, ret_cpu = self.try_cross_node_alloc(job)
         else:
             print("Invalid node number for job[{}]".format(job['jid']))
-            ret = False
-        return ret
+            return False, 0, 0
+        return done, ret_gpu, ret_cpu
 
     def try_cross_node_alloc(self, job):
         need_gpu = job['num_gpu']
         need_node = job['num_node']
         need_gpu_p_node = (need_gpu - 1) // need_node + 1
+        # @NOTE What if need_gpu_p_node > max_gpu_num: -> current solution: just pend it...
         need_cpu_p_node = 4
         left_gpu = need_gpu % need_gpu_p_node + need_gpu_p_node
         if self.free_gpus < need_gpu or self.free_cpus < need_node * need_cpu_p_node:
-            return False
+            return False, 0, 0
 
         possible_nodes = []
         left_node = -1
@@ -169,16 +170,16 @@ class Switch:
             create_node_placement(job, self.id, possible_nodes+[left_node],
                                   [need_gpu_p_node]*(need_node-1)+[left_gpu],
                                   [need_cpu_p_node]*need_node)
-            return True
+            return True, need_gpu, need_cpu_p_node*need_node
         else:
-            return False
+            return False, 0, 0
 
     def try_single_node_alloc(self, job):
         need_gpu = job['num_gpu']
         # @NOTE each job is assigned 4 cores per node
         need_cpu = 4
         if self.free_gpus < need_gpu or self.free_cpus < need_cpu:
-            return False
+            return False, 0, 0
         # @TODO finer grained placement policy?
         for node in self.node_list:
             if node.free_gpus >= need_gpu and node.free_cpus >= need_cpu:
@@ -188,8 +189,8 @@ class Switch:
                 create_node_placement(job, self.id, node.id, need_gpu, need_cpu)
                 self.free_gpus -= need_gpu
                 self.free_cpus -= need_cpu
-                return True
-        return False
+                return True, need_gpu, need_cpu
+        return False, 0, 0
 
 
 
@@ -273,31 +274,26 @@ class Cluster:
         :return:
         """
         for switch in self.switch_list:
-            ret = switch.slurm_alloc_res(job)
-            if ret:
+            done, ret_gpu, ret_cpu = switch.slurm_alloc_res(job)
+            if done:
+                self.free_gpus -= ret_gpu
+                self.free_cpus -= ret_cpu
                 return True
-            # @TODO metadata
         return False
 
     def release_job_res(self, job):
         for placement in job['placements']:
             if ('switch' not in placement) or ('nodes' not in placement):
-                job['state'] = 'ERROR'
-                print("Fail to release resource for job {}".format(job['jid']))
                 return False
 
             done, ret_cpu, ret_gpu = self.switch_list[placement['switch']].release_job_res(job['jid'],
                                                                                            placement['nodes'])
-            # @TODO maintain metadata for cluster
+            # maintain metadata for cluster
             self.free_gpus += ret_gpu  # #gpus that are really idle!
             self.free_cpus += ret_cpu
 
             if not done:
-                job['state'] = 'ERROR'
-                print("Fail to release resource for job {}".format(job['jid']))
                 return False
-        job['state'] = 'COMPLETED'
-        print("job[{}] completed".format(job['jid']))
         return True
 
     def add(self, **kwargs):
@@ -308,18 +304,26 @@ class Cluster:
 
     def __str__(self):
         out_str = 'Cluster Overview:\n' + 8 * '-' + '\n'
-        out_str += f'Cluster:\t#GPU: {self.num_gpu}\t#CPU: {self.num_cpu}\n'
+        out_str += f'Cluster:\t#GPU: {self.free_gpus}/{self.num_gpu}\t#CPU: {self.free_cpus}/{self.num_cpu}\n'
         out_str += "/" + 10 * '-' + '\n'
         for s in range(self.num_switch):
             switch = self.switch_list[s]
-            out_str += f"|- Switch{switch.id}:\t#GPU: {switch.num_gpu}\t#CPU: {switch.num_cpu}\n"
+            out_str += f"|- Switch{switch.id}:\t#GPU: {switch.free_gpus}/{switch.num_gpu}\t" \
+                       f"#CPU: {switch.free_cpus}{switch.num_cpu}\n"
             out_str += "|  /" + 7 * '-' + '\n'
             for n in range(self.switch_list[s].num_node):
                 node = self.switch_list[s].node_list[n]
-                out_str += f"|  |- Node{node.id}:\t#GPU: {node.num_gpu}\t#CPU: {node.num_cpu}\tGPU Type: {node.gpu_type}\n"
+                out_str += f"|  |- Node{node.id}:\t" \
+                           f"#GPU: {node.free_gpus}/{node.num_gpu}\t" \
+                           f"#CPU: {node.free_cpus}/{node.num_cpu}\tGPU Type: {node.gpu_type}\n"
             out_str += "|  \\" + 7 * '-' + '\n'
         out_str += "\\" + 10 * '-'
         return out_str
+
+    def report(self):
+        out_str = 'Cluster Report:'
+        out_str += f'Cluster:\t#GPU: {self.free_gpus}/{self.num_gpu}\t#CPU: {self.free_cpus}/{self.num_cpu}'
+        print(out_str)
 
 
 def main():

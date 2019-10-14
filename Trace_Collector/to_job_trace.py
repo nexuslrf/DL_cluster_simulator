@@ -23,7 +23,7 @@ def omit_minutes(series):
 
 
 taskinfo_col = [
-    'job_id', 'job_name', 'partition_name', 'node_num', 'res_gpu',
+    'job_id', 'job_name', 'partition_name', 'res_node', 'res_gpu', 'node_num', 'alloc_gpu',
     'user', 'priority', 'state', 'submit', 'start', 'end', 'gpu_num',
     'pending_time', 'running_time'
 ]

@@ -6,21 +6,41 @@ def fifo_sim(cluster, jobs):
     :param jobs:
     :return:
     """
-    finish = False
-    while not finish:
-        if jobs.PC:
-            # @TODO cluster out of usage
-            pass
+    while jobs.PC < len(jobs.events):
+        if jobs.check_overload():
+            # cluster out of usage
+            print("This cluster is not large enough to run the job")
+            break
 
         event = jobs.events[jobs.PC]
         event_time = event['time']
-        for job in event['end_jobs']:
-            # @TODO
-            cluster.release_job_res(job)
+        for jid in event['end_jobs']:
+            job = jobs.submit_jobs[jid]
+            if cluster.release_job_res(job):
+                jobs.finish_jobs('COMPLETED', job)
+            else:
+                jobs.finish_jobs('ERROR', job)
 
-        jobs.pend_jobs()
-        if cluster.free_gpus() > 0:
+        for jid in event['start_jobs']:
+            job = jobs.submit_jobs[jid]
+            jobs.pend_jobs(job)
+
+        if cluster.free_gpus > 0:
             # We can start jobs!
-            new_start_list = []
-            for job in jobs.pending_jobs:
+            issuing_jobs = []
+            for jid in jobs.pending_jobs:
+                job = jobs.submit_jobs[jid]
+                if cluster.try_alloc_res(job):
+                    issuing_jobs.append(jid)
+
+            for jid in issuing_jobs:
+                job = jobs.submit_jobs[jid]
+                jobs.issue_jobs(job, event_time)
+                jobs.add_end_events(job)
+
+        jobs.PC += 1
+        print(f"time[{event_time}] ", end='')
+        cluster.report()
+        print(f"time[{event_time}] ", end='')
+        jobs.report()
 
