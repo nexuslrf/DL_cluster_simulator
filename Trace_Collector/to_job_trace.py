@@ -40,10 +40,11 @@ taskinfo = taskinfo.dropna()
 # rm job without using GPUs
 taskinfo = taskinfo[taskinfo['gpu_num'] > 0]
 # only choose job with COMPLETED state
-taskinfo = taskinfo[taskinfo['state'] != 'COMPLETED']
+taskinfo = taskinfo[taskinfo['state'] == 'COMPLETED']
 # time range to select
 taskinfo = taskinfo[taskinfo['submit'] >= pd.to_datetime(args.time_L_bnd)]
 taskinfo = taskinfo[taskinfo['submit'] <= pd.to_datetime(args.time_R_bnd)]
+taskinfo = taskinfo[taskinfo['running_time'] > 30]
 """
 -----------------------------------------------------------------------------------
 """
@@ -59,9 +60,9 @@ for par in parti_name:
           f"valid submitted jobs, partition name: {par}")
     jobs['r_submit'] = (jobs['submit'] - pd.to_datetime(args.time_L_bnd)).dt.seconds
     jobs.to_csv(f'jobs_{par}.csv',
-                columns=['gpu_num', 'r_submit', 'running_time', 'job_name'],
+                columns=['node_num', 'gpu_num', 'r_submit', 'running_time', 'job_name'],
                 index_label='jid',
-                header=['num_gpu','submit_time', 'running_time', 'model'])
+                header=['num_node', 'num_gpu', 'submit_time', 'running_time', 'model'])
 
 
 

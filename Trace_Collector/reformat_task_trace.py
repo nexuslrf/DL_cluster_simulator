@@ -2,6 +2,7 @@ import datetime
 import time
 from datetime import datetime
 
+
 def process_tasks(taskRawFile, taskCsvFile):
     jobInfoList = ''
     for line in open(taskRawFile):
