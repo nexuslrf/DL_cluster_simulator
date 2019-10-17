@@ -70,7 +70,9 @@ class Node:
 
 
 class Switch:
-    def __init__(self, idx=0, node_list=[], **kwargs):
+    def __init__(self, idx=0, node_list=None, **kwargs):
+        if node_list is None:
+            node_list = []
         self.id = idx
         self.node_list = node_list
         self.num_node = len(node_list)
@@ -79,16 +81,14 @@ class Switch:
         if self.num_node == 0:
             if 'switch_nodes' in kwargs:
                 self.num_node = kwargs['switch_nodes']
-            else:
-                return
-            self.node_list = [Node(idx=i, **kwargs) for i in range(self.num_node)]
-            self.num_gpu = sum(node.num_gpu for node in self.node_list)
-            self.num_cpu = sum(node.num_cpu for node in self.node_list)
+                self.node_list = [Node(idx=i, **kwargs) for i in range(self.num_node)]
+                self.num_gpu = sum(node.num_gpu for node in self.node_list)
+                self.num_cpu = sum(node.num_cpu for node in self.node_list)
         self.free_cpus = self.num_cpu
         self.free_gpus = self.num_gpu
 
     def add(self, **kwargs):
-        newNode = Node(idx=self.num_node, **kwargs)
+        newNode = Node(idx=kwargs['node_id'], **kwargs)
         self.num_node += 1
         self.num_gpu += newNode.num_gpu
         self.num_cpu += newNode.num_cpu
@@ -200,7 +200,9 @@ mata data of cluster: Cluster -> Switch -> Node -> GPU
 
 
 class Cluster:
-    def __init__(self, switch_list=[]):
+    def __init__(self, switch_list=None):
+        if switch_list is None:
+            switch_list = []
         self.switch_list = switch_list
         self.num_switch = len(switch_list)
         self.num_gpu = sum(switch.num_gpu for switch in switch_list)
@@ -233,7 +235,7 @@ class Cluster:
         elif len(keys) == 6:  # heterogeneous case
             switch_dict = dict()
             for row in reader:
-                row = {key: eval(val) if key != 'gpu_type' else val for (key, val) in row.items()}
+                row = {key: eval(val) if val.isdigit() else val for (key, val) in row.items()}
                 if row['switch_id'] not in switch_dict:
                     switch_dict[row['switch_id']] = Switch()
                 switch_dict[row['switch_id']].add(**row)
@@ -328,7 +330,7 @@ class Cluster:
 
 def main():
     cluster = Cluster()
-    cluster.init_from_csv('cluster_info.csv')
+    cluster.init_from_csv('Cluster_Info/cluster_info.csv')
     print(cluster)
 
 

@@ -1,6 +1,8 @@
 *.csv
 /Trace_Collector/Task_Trace.ipynb
-/iblinkinfo.txt
+/Cluster_Info/iblinkinfo.txt
 __pycache__
 .idea
 /Trace_Collector/tasks.txt
+/notes.md
+/Cluster_Info/sinfo.txt
