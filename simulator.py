@@ -10,6 +10,7 @@ from opt import opt
 from cluster import Node, Switch, Cluster
 from job import JobEvents
 import scheduling
+from tracing_viewer import generate_trace_json
 
 args = opt
 
@@ -25,6 +26,7 @@ def main():
     # Start sim
     if args.schedule == 'fifo':
         scheduling.fifo_sim(cluster, jobs)
+    generate_trace_json(jobs)
 
 
 if __name__ == '__main__':

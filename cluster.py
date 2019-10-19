@@ -88,7 +88,7 @@ class Switch:
         self.free_gpus = self.num_gpu
 
     def add(self, **kwargs):
-        newNode = Node(idx=kwargs['node_id'], **kwargs)
+        newNode = Node(idx=self.num_node, **kwargs)  # idx=kwargs['node_id']
         self.num_node += 1
         self.num_gpu += newNode.num_gpu
         self.num_cpu += newNode.num_cpu
@@ -271,7 +271,8 @@ class Cluster:
 
     def slurm_placement(self, job):
         r"""
-        slurm: all gpus should come from the same switch
+        slurm:
+
         :param job:
         :return:
         """
