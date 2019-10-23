@@ -120,23 +120,24 @@ class Switch:
                 return False, ret_cpu, ret_gpu
         return True, ret_cpu, ret_gpu
 
-    def slurm_get_res(self, job):
+    def slurm_get_res(self, job, nlist=None):
         r"""
         alloc res from a single switch
+        :param nlist:
         :param job:
         :return:
         """
         # @TODO consider ps-worker network load!
         need_node = job['num_node']
         if need_node == 1:  # non-distributed
-            return self.try_single_node_alloc(job)
+            return self.try_single_node_alloc(job, nlist)
         elif need_node > 1:
-            return self.try_cross_node_alloc(job)
+            return self.try_cross_node_alloc(job, nlist)
         else:
             print("Invalid node number for job[{}]".format(job['jid']))
             return False, list()  # @TODO
 
-    def try_cross_node_alloc(self, job):
+    def try_cross_node_alloc(self, job, nlist=None):
         need_gpu = job['num_gpu']
         need_node = job['num_node']
         need_gpu_p_node = job['num_gpu_p_node']
@@ -146,6 +147,8 @@ class Switch:
         node_cnt = 0
         # @TODO finer grained placement policy?
         for node in self.node_list:
+            if nlist is not None and node.id not in nlist:
+                continue
             if node.free_gpus >= need_gpu_p_node and node.free_cpus >= num_cpu_p_node:
                 possible_nodes.append(node.id)
                 node_cnt += 1
@@ -157,7 +160,7 @@ class Switch:
         else:
             return False, possible_nodes
 
-    def try_single_node_alloc(self, job):
+    def try_single_node_alloc(self, job, nlist=None):
         need_gpu = job['num_gpu']
         # @NOTE each job is assigned 4 cores per node
         # @TODO may perform like Tiresias for num of CPU
@@ -166,6 +169,8 @@ class Switch:
             return False, 0, 0, list()
         # @TODO finer grained placement policy?
         for node in self.node_list:
+            if nlist is not None and node.id not in nlist:
+                continue
             if node.free_gpus >= need_gpu and node.free_cpus >= need_cpu:
                 return True, [node.id]
         return False, list()
@@ -201,6 +206,7 @@ class Cluster:
         self.free_gpus = self.num_gpu
         self.free_cpus = self.num_cpu
         self.use_partition = False
+        self.partitions = None
 
     def init_from_csv(self, file_path):
         r"""
@@ -247,6 +253,7 @@ class Cluster:
         self.free_gpus = self.num_gpu
         self.free_cpus = self.num_cpu
 
+    # @TODO partition based alloc!
     def try_alloc_res(self, job, policy='slurm'):
         r"""
         placements:
@@ -272,10 +279,15 @@ class Cluster:
         sw_nodes = []
         possible_sw = []
         nodes_cnt = 0
+        nlist = None
         need_node = job['num_node']
-
         for switch in self.switch_list:
-            done, nodes = switch.slurm_get_res(job)
+            if self.use_partition:
+                if switch.id not in self.partitions[job['partition']]:
+                    continue
+                else:
+                    nlist = self.partitions[job['partition']][switch.id]
+            done, nodes = switch.slurm_get_res(job, nlist)
             if done:
                 self.free_gpus -= job['num_gpu']
                 self.free_cpus -= job['num_node'] * num_cpu_p_node
@@ -283,7 +295,6 @@ class Cluster:
                 switch.slurm_alloc_res(job, nodes)
                 return True
             elif len(nodes) > 0:
-                # @TODO!
                 sw_nodes.append(nodes)
                 possible_sw.append(switch.id)
                 nodes_cnt += len(nodes)
@@ -380,6 +391,7 @@ class Partition:
                         self.partitions[par][sw_id] = []
                     self.partitions[par][sw_id].append(n_id)
                     cluster.switch_list[sw_id].node_list[n_id].partition = par
+        cluster.partitions = self.partitions    # my ugly programming! :-(
 
     def get_id_name_map(self, default_par='Others'):
         for switch in self.cluster.switch_list:

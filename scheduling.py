@@ -25,18 +25,17 @@ def fifo_sim(cluster, jobs):
             job = jobs.submit_jobs[jid]
             jobs.pend_jobs(job)
 
-        if cluster.free_gpus > 0:
-            # We can start jobs!
-            issuing_jobs = []
-            for jid in jobs.pending_jobs:
-                job = jobs.submit_jobs[jid]
-                if cluster.try_alloc_res(job):
-                    issuing_jobs.append(jid)
+        # We can start jobs!
+        issuing_jobs = []
+        for jid in jobs.pending_jobs:
+            job = jobs.submit_jobs[jid]
+            if cluster.try_alloc_res(job):
+                issuing_jobs.append(jid)
 
-            for jid in issuing_jobs:
-                job = jobs.submit_jobs[jid]
-                jobs.issue_jobs(job, event_time)
-                jobs.add_end_events(job)
+        for jid in issuing_jobs:
+            job = jobs.submit_jobs[jid]
+            jobs.issue_jobs(job, event_time)
+            jobs.add_end_events(job)
 
         jobs.PC += 1
         print(f"time[{event_time}] ", end='')
