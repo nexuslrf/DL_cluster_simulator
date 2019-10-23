@@ -60,9 +60,9 @@ for par in parti_name:
           f"valid submitted jobs, partition name: {par}")
     jobs['r_submit'] = (jobs['submit'] - pd.to_datetime(args.time_L_bnd)).dt.seconds
     jobs.to_csv(f'jobs_{par}.csv',
-                columns=['node_num', 'gpu_num', 'r_submit', 'running_time', 'job_name'],
+                columns=['node_num', 'gpu_num', 'r_submit', 'running_time', 'job_name', 'partition_name'],
                 index_label='jid',
-                header=['num_node', 'num_gpu', 'submit_time', 'running_time', 'model'])
+                header=['num_node', 'num_gpu', 'submit_time', 'running_time', 'model', 'partition'])
 
 
 
