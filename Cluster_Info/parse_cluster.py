@@ -5,6 +5,7 @@ from networkx.drawing.nx_pydot import graphviz_layout
 #import colormap
 from matplotlib import cm
 import matplotlib
+import matplotlib.colors
 import csv
 import numpy as np
 from matplotlib import ticker
@@ -146,7 +147,8 @@ def draw_topo(nodes, switches, partitions=None):
             if nd in node_par:
                 colors.append(2+par_id[node_par[nd]])
             else:
-                colors.append(cnt)
+                colors.append(2+cnt)
+
     pos = dict()
     pos.update(nx.circular_layout(ssw, 1, [0, 0]))
     pos.update(nx.circular_layout(sw, 5, [0, 0]))
@@ -158,8 +160,13 @@ def draw_topo(nodes, switches, partitions=None):
                     tmp.append(i)
             pos.update(nx.spring_layout(tmp, 1, center=pos[k]))
 
-    cmap = plt.cm.get_cmap(CMAP)
-    norm = matplotlib.colors.BoundaryNorm(np.arange(-0.5, cnt+3, 1), cmap.N)
+    # cmap = plt.cm.get_cmap(CMAP, cnt+4)
+    # norm = matplotlib.colors.BoundaryNorm(np.arange(-0.5, cnt+3, 1), cmap.N)
+
+    cmap = plt.cm.get_cmap('Paired')
+    cmap = matplotlib.colors.ListedColormap(['b', 'cyan'] + list(cmap.colors))
+    norm = matplotlib.colors.BoundaryNorm(np.arange(-0.5, cnt + 3, 1), cmap.N)
+
     nx.draw(B, pos, node_color=colors, with_labels=True, alpha=0.8, size=300, cmap=cmap, norm=norm)
     # pc = matplotlib.collections.PatchCollection(edges, cmap=cmap)
     # pc.set_array(colors)

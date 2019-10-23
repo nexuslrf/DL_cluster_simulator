@@ -32,6 +32,8 @@ class JobEvents:
         for job in reader:
             job = {key: eval(val) if key != 'model' else val for (key, val) in job.items()}
             job['state'] = "UNISSUED"
+            job['num_gpu_p_node'] = (job['num_gpu'] - 1) // job['num_node'] + 1
+            job['num_gpu'] = job['num_gpu_p_node'] * job['num_node']
             self.submit_jobs.append(job)
         # self.submit_jobs.sort(key=lambda t: t['submit_time'])
         self.submit_jobs = {job['jid']: job for job in self.submit_jobs}
