@@ -23,14 +23,14 @@ class JobEvents:
         r"""
         :param file_path: trace of completed jobs [CURRENT VERSION]
             file format: time unit: sec
-                jid,num_gpu,submit_time,running_time,model
-                0,4,100,20000,CNN
+                jid,num_gpu,submit_time,running_time,model,[partition(optional)]
+                0,4,100,20000,CNN, [Pose]
         :return: list of sorted jobs
         """
         fh = open(file_path)
         reader = csv.DictReader(fh)
         for job in reader:
-            job = {key: eval(val) if key != 'model' else val for (key, val) in job.items()}
+            job = {key: eval(val) if key.isdigit() else val for (key, val) in job.items()}
             job['state'] = "UNISSUED"
             job['num_gpu_p_node'] = (job['num_gpu'] - 1) // job['num_node'] + 1
             job['num_gpu'] = job['num_gpu_p_node'] * job['num_node']

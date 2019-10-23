@@ -43,8 +43,9 @@ class Node:
         self.free_gpus = self.num_gpu
         self.free_mem = self.mem
         self.jobs = []
+        self.partition = ''
         if name is None:
-            self.name = f'Node{idx}'
+            self.name = f'{idx}'
         else:
             self.name = name
 
@@ -150,20 +151,8 @@ class Switch:
                 node_cnt += 1
                 if node_cnt == need_node:
                     break
-        # ----------------------------------------
+
         if node_cnt == need_node:
-            # for nid in possible_nodes:
-            #     node = self.node_list[nid]
-            #     node.free_gpus -= need_gpu_p_node
-            #     node.free_cpus -= num_cpu_p_node
-            #     node.jobs.append(job['jid'])
-            #     self.free_gpus -= need_gpu_p_node
-            #     self.free_cpus -= num_cpu_p_node
-            #
-            # create_node_placement(job, self.id, possible_nodes,
-            #                       [need_gpu_p_node]*need_node,
-            #                       [num_cpu_p_node]*need_node)
-        # ----------------------------------------
             return True, possible_nodes
         else:
             return False, possible_nodes
@@ -211,6 +200,7 @@ class Cluster:
         self.num_cpu = sum(switch.num_cpu for switch in switch_list)
         self.free_gpus = self.num_gpu
         self.free_cpus = self.num_cpu
+        self.use_partition = False
 
     def init_from_csv(self, file_path):
         r"""
@@ -223,6 +213,7 @@ class Cluster:
             For heterogeneous format: rows of nodes
                 node_id, node_gpu, node_cpu, node_mem, gpu_type, switch_id
                 0, 6, 4, 20, 128, 1080Ti, 0
+            To use partition function, use Partition class specified input file
         :return:
         """
         fh = open(file_path)
@@ -240,7 +231,7 @@ class Cluster:
                 row = {key: eval(val) if val.isdigit() else val for (key, val) in row.items()}
                 if row['switch_id'] not in switch_dict:
                     switch_dict[row['switch_id']] = Switch(name=row['switch_id'])
-                switch_dict[row['switch_id']].add(name='Node{}'.format(row['node_id']), **row)
+                switch_dict[row['switch_id']].add(name='{}'.format(row['node_id']), **row)
             cnt = 0
             for key, val in switch_dict.items():
                 val.id = cnt
@@ -351,11 +342,76 @@ class Cluster:
         print(out_str)
 
 
+class Partition:
+    r"""
+    sub-graph of cluster
+    """
+    def __init__(self, cluster, file='sinfo.csv'):
+        r"""
+        partitions -> switches dict -> list of node id
+        """
+        self.partition_name = []
+        self.partitions = dict()
+        # node_name_id -> node_name: (switch_id, node_id)
+        self.node_name_id = dict()
+        self.cluster = cluster
+        cluster.use_partition = True
+        self.get_id_name_map(cluster)
+        # init_from_csv
+        fh = open(file)
+        reader = csv.DictReader(fh)
+        partitions = dict()
+        for line in reader:
+            name = line['PARTITION']
+            node_name = line['NODELIST'].split('-')[-1]
+            if name not in partitions:
+                partitions[name] = list()
+            partitions[name].append(node_name)
+        for k, v in partitions.items():
+            v.sort(key=lambda x: eval(x))
+        self.partition_name = partitions.keys()
+
+        for par, nlist in partitions.items():
+            self.partitions[par] = dict()
+            for n_name in nlist:
+                if n_name in self.node_name_id:
+                    sw_id, n_id = self.node_name_id[n_name]
+                    if sw_id not in self.partitions[par]:
+                        self.partitions[par][sw_id] = []
+                    self.partitions[par][sw_id].append(n_id)
+                    cluster.switch_list[sw_id].node_list[n_id].partition = par
+
+    def get_id_name_map(self, default_par='Others'):
+        for switch in self.cluster.switch_list:
+            for node in switch.node_list:
+                self.node_name_id[node.name] = (switch.id, node.id)
+                node.partition = default_par
+
+    def __str__(self):
+        out_str = 'Partition Overview:\n' + 8 * '-' + '\n'
+        for par, sw_dict in self.partitions.items():
+            out_str += f"Partition: {par}\n" + '/' + 9 * '-' + '\n'
+            for sw_id, nlist in sw_dict.items():
+                switch = self.cluster.switch_list[sw_id]
+                out_str += f"|- Switch[{switch.id}]:\t{switch.name}\t#GPU: {switch.free_gpus}/{switch.num_gpu}\t" \
+                        f"#CPU: {switch.free_cpus}{switch.num_cpu}\n"
+                # out_str += "|  /" + 7 * '-' + '\n'
+                for n_id in nlist:
+                    node = switch.node_list[n_id]
+                    out_str += f"|  |- Node[{node.id}]:\t{node.name}\t" \
+                               f"#GPU: {node.free_gpus}/{node.num_gpu}\t" \
+                               f"#CPU: {node.free_cpus}/{node.num_cpu}\tGPU Type: {node.gpu_type}\n"
+                out_str += "|  \\" + 6 * '-' + '\n'
+            out_str += "\\" + 9 * '-' + '\n'
+        return out_str
+
+
 def main():
     cluster = Cluster()
     cluster.init_from_csv('Cluster_Info/cluster_info.csv')
     print(cluster)
-
+    partition = Partition(cluster, 'Cluster_Info/sinfo.csv')
+    print(partition)
 
 if __name__ == '__main__':
     main()
