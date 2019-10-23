@@ -5,4 +5,4 @@ __pycache__
 .idea
 /Trace_Collector/tasks.txt
 /notes.md
-/Cluster_Info/sinfo.txt
+/Cluster_Info/sinfo.csv
