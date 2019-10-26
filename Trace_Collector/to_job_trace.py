@@ -10,7 +10,7 @@ parser.add_argument('--task_file', default='tasks.csv', type=str)
 parser.add_argument('--out_file', default='jobs.csv', type=str)
 parser.add_argument('--partition', default=5, type=int)
 parser.add_argument('--time_L_bnd', default='2019-09-01 00:00', type=str)
-parser.add_argument('--time_R_bnd', default='2019-09-10 00:00', type=str)
+parser.add_argument('--time_R_bnd', default='2019-09-05 00:00', type=str)
 args = parser.parse_args()
 
 
@@ -51,6 +51,13 @@ taskinfo = taskinfo[taskinfo['running_time'] > 30]
 taskinfo.index = taskinfo.index.astype(int)
 taskinfo['running_time'] = taskinfo['running_time'].astype(int)
 taskinfo['gpu_num'] = taskinfo['gpu_num'].astype(int)
+taskinfo['r_submit'] = (taskinfo['submit'] - pd.to_datetime(args.time_L_bnd)).dt.seconds
+
+taskinfo.to_csv(f'jobs.csv',
+            columns=['node_num', 'gpu_num', 'r_submit', 'running_time', 'job_name', 'partition_name'],
+            index_label='jid',
+            header=['num_node', 'num_gpu', 'submit_time', 'running_time', 'model', 'partition'])
+
 # select partition
 parti_name = taskinfo['partition_name'].astype('category').cat.categories.tolist()
 print(parti_name)
@@ -58,7 +65,6 @@ for par in parti_name:
     jobs = taskinfo[taskinfo['partition_name'] == par]
     print(f"There are {len(jobs)} "
           f"valid submitted jobs, partition name: {par}")
-    jobs['r_submit'] = (jobs['submit'] - pd.to_datetime(args.time_L_bnd)).dt.seconds
     jobs.to_csv(f'jobs_{par}.csv',
                 columns=['node_num', 'gpu_num', 'r_submit', 'running_time', 'job_name', 'partition_name'],
                 index_label='jid',

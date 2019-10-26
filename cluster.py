@@ -166,7 +166,7 @@ class Switch:
         # @TODO may perform like Tiresias for num of CPU
         need_cpu = 4
         if self.free_gpus < need_gpu or self.free_cpus < need_cpu:
-            return False, 0, 0, list()
+            return False, list()
         # @TODO finer grained placement policy?
         for node in self.node_list:
             if nlist is not None and node.id not in nlist:
@@ -281,6 +281,7 @@ class Cluster:
         nodes_cnt = 0
         nlist = None
         need_node = job['num_node']
+
         for switch in self.switch_list:
             if self.use_partition:
                 if switch.id not in self.partitions[job['partition']]:
@@ -300,8 +301,8 @@ class Cluster:
                 nodes_cnt += len(nodes)
                 if nodes_cnt >= need_node:
                     for sw, nlist in zip(possible_sw, sw_nodes):
-                        nodes_cnt -= len(nlist)
-                        nlist = nlist[:nodes_cnt] if nodes_cnt < 0 else nlist
+                        need_node -= len(nlist)
+                        nlist = nlist[:need_node] if need_node < 0 else nlist
                         self.switch_list[sw].slurm_alloc_res(job, nlist)
                     self.free_gpus -= job['num_gpu']
                     self.free_cpus -= job['num_node'] * num_cpu_p_node
@@ -318,7 +319,6 @@ class Cluster:
             # maintain metadata for cluster
             self.free_gpus += ret_gpu  # #gpus that are really idle!
             self.free_cpus += ret_cpu
-
             if not done:
                 return False
         return True

@@ -102,6 +102,7 @@ def get_rgb(x, vmin=0, vmax=10):
 
 
 def draw_topo(nodes, switches, partitions=None):
+    plt.figure(dpi=60, figsize=(16, 12))
     B = nx.Graph()
     # Add nodes with the node attribute "bipartite"
     nd = nodes.keys()
