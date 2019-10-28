@@ -1,8 +1,6 @@
 import matplotlib.pyplot as plt
 import networkx as nx
-import pydot
-from networkx.drawing.nx_pydot import graphviz_layout
-#import colormap
+import colorcet as cc
 from matplotlib import cm
 import matplotlib
 import matplotlib.colors
@@ -164,8 +162,8 @@ def draw_topo(nodes, switches, partitions=None):
     # cmap = plt.cm.get_cmap(CMAP, cnt+4)
     # norm = matplotlib.colors.BoundaryNorm(np.arange(-0.5, cnt+3, 1), cmap.N)
 
-    cmap = plt.cm.get_cmap('Paired')
-    cmap = matplotlib.colors.ListedColormap(['b', 'cyan'] + list(cmap.colors))
+    cc_color = [cc.cm.glasbey(i) for i in range(12)] #plt.cm.get_cmap('Paired')
+    cmap = matplotlib.colors.ListedColormap(['b', 'y'] + cc_color)
     norm = matplotlib.colors.BoundaryNorm(np.arange(-0.5, cnt + 3, 1), cmap.N)
 
     nx.draw(B, pos, node_color=colors, with_labels=True, alpha=0.8, size=300, cmap=cmap, norm=norm)

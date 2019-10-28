@@ -6,6 +6,7 @@ import copy
 from cluster import Node, Switch, Cluster, Partition
 from matplotlib.patches import Circle, Rectangle
 from matplotlib.widgets import Slider, Button, RadioButtons
+from matplotlib import animation
 import numpy as np
 import bisect
 
@@ -50,7 +51,8 @@ def event_log(logger, event_time, jobs):
 def cluster_visualization(cluster, logger, d=2, fig_w=8, node_h=15, node_w=16):
     r = d / 2
     fig, ax = plt.subplots(1, 1, figsize=(fig_w, fig_w / node_w * node_h))
-    plt.subplots_adjust(left=0.20, right=0.8, bottom=0.20, top=0.8)
+
+    plt.subplots_adjust(left=0.15, right=0.85, bottom=0.20, )
     ax.set_xlim(0, node_w * d)
     ax.set_ylim(0, node_h * d)
     ax.set_xticks(np.arange(r, d * node_w, d))
@@ -67,6 +69,8 @@ def cluster_visualization(cluster, logger, d=2, fig_w=8, node_h=15, node_w=16):
     norm = mpl.colors.Normalize(vmin=0, vmax=9)
     cmap = cm.get_cmap('gist_heat')
     maps = cm.ScalarMappable(norm=norm, cmap=cmap)
+    call_time = True
+    anim_pause = True
 
     for par, sw_dict in cluster.partitions.items():
         col = 0
@@ -93,25 +97,74 @@ def cluster_visualization(cluster, logger, d=2, fig_w=8, node_h=15, node_w=16):
     fig.canvas.draw_idle()
 
     axcolor = 'lightgoldenrodyellow'
-    axtime = plt.axes([0.20, 0.1, 0.65, 0.03], facecolor=axcolor)
+    axtime = plt.axes([0.15, 0.1, 0.65, 0.03], facecolor=axcolor)
+    axevent = plt.axes([0.15, 0.03, 0.65, 0.03], facecolor=axcolor)
 
     time_slider = Slider(axtime, 'Event Time', 0, timeline[-1], valinit=0, valstep=1)
+    event_idx_slider = Slider(axevent, 'Event Index', -1, len(timeline), valinit=0, valstep=1)
 
-    def update(time):
-        # time = time_slider.val
+    anim = None
+
+    def init():
         for k, cir in node_to_cir.items():
             cir.set_color(maps.to_rgba(0))
+
+    def update_time(time):
+        nonlocal call_time
+        # time = time_slider.val
+        init()
         if time >= timeline[0]:
-            idx = bisect.bisect_left(timeline, time) - 1
+            idx = bisect.bisect_right(timeline, time) - 1
+            call_time = False
+            event_idx_slider.set_val(idx)
             for node in logger[idx]['used_nodes']:
-                node_to_cir['{}_{}'.format(node['switch_id'], node['node_id'])]\
+                node_to_cir['{}_{}'.format(node['switch_id'], node['node_id'])] \
                     .set_color(maps.to_rgba(node['used_gpu']))
         fig.canvas.draw_idle()
 
-    time_slider.on_changed(update)
+    def update_event(idx):
+        nonlocal call_time
+        if call_time:
+            if idx < 0:
+                time = 0
+            else:
+                time = timeline[int(idx)]
+            time_slider.set_val(time)
+        else:
+            call_time = True
+
+    def animate(i):
+        init()
+        i = (int(event_idx_slider.val) + 1) % len(timeline)
+        event_idx_slider.set_val(i)
+
+    def animate_button(event):
+        nonlocal anim_pause, anim
+        if not anim_pause:
+            anim.event_source.start()
+            anim_pause = True
+        else:
+            if anim is None:
+                anim = animation.FuncAnimation(fig=fig,
+                                               func=animate,
+                                               frames=len(logger),
+                                               init_func=init,
+                                               interval=5,
+                                               repeat=True,
+                                               )
+            anim.event_source.stop()
+            anim_pause = False
+
+    time_slider.on_changed(update_time)
+    event_idx_slider.on_changed(update_event)
+
+    # animation button
+    ax_run = fig.add_axes([0.85, 0.07, 0.12, 0.03], facecolor=axcolor)
+    run_button = Button(ax_run, 'Run Sim!')
+    run_button.on_clicked(animate_button)
 
     # cbar_ax2 = fig.add_axes([0.85, 0.2, 0.05, 0.75])
-    cbar_ax2 = fig.add_axes([0.85, 0.20, 0.05, 0.60])
+    cbar_ax2 = fig.add_axes([0.9, 0.20, 0.05, 0.60])
     # cbar = fig.colorbar(sca, cax=cbar_ax2, ticks=[0, 4, 9, 14, 19])
     cbar = fig.colorbar(cm.ScalarMappable(norm=norm, cmap=cmap), cax=cbar_ax2)
     plt.show()
@@ -122,4 +175,3 @@ if __name__ == '__main__':
     cluster.init_from_csv('Cluster_Info/cluster_info.csv')
     partition = Partition(cluster, 'Cluster_Info/sinfo.csv')
     cluster_visualization(cluster, 'cluster_log.json')
-
