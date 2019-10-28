@@ -9,19 +9,22 @@ Suppose each node contains GPUs of the same type.
 """
 
 
-def create_node_placement(job, switch_id, node_ids, num_gpus, num_cpus):
+def create_node_placement(job, switch_id, node_ids, num_gpus, num_cpus, gpu_ids=None):
     if type(node_ids) != list:
         node_ids = [node_ids, ]
         num_cpus = [num_cpus, ]
         num_gpus = [num_gpus, ]
+    if gpu_ids is None:
+        gpu_ids = [None] * len(node_ids)
     sw_place = dict()
     sw_place['switch'] = switch_id
     sw_place['nodes'] = []
-    for nid, num_gpu, num_cpu in zip(node_ids, num_gpus, num_cpus):
+    for nid, num_gpu, num_cpu, gid in zip(node_ids, num_gpus, num_cpus, gpu_ids):
         node_place = dict()
         node_place['id'] = nid
         node_place['num_gpu'] = num_gpu
         node_place['num_cpu'] = num_cpu
+        node_place['gpu_assign'] = gid
         # node_place['mem']
         # node_place['tasks'] = list()
         # node_place['network']
@@ -42,16 +45,33 @@ class Node:
         self.free_cpus = self.num_cpu
         self.free_gpus = self.num_gpu
         self.free_mem = self.mem
-        self.jobs = []
+        self.jobs = dict()
+        self.used_gpu = [-1] * node_gpu
         self.partition = ''
         if name is None:
             self.name = f'{idx}'
         else:
             self.name = name
 
+    def alloc_job(self, jid, num_gpu, num_cpu):
+        self.free_gpus -= num_gpu
+        self.free_cpus -= num_cpu
+        self.jobs[jid] = []
+        cnt = 0
+        for i in range(self.num_gpu):
+            if self.used_gpu[i]<0:
+                self.used_gpu[i] = jid
+                cnt += 1
+                self.jobs[jid].append(i)
+            if cnt == num_gpu:
+                break
+        return self.jobs[jid]
+
     def release_job_res(self, jid, node):
         if jid in self.jobs:
-            self.jobs.remove(jid)
+            for g in self.jobs[jid]:
+                self.used_gpu[g] = -1
+            self.jobs.pop(jid)
         # [X] self.release_network_load(node['network']) # if necessary
         if self.free_cpus + node['num_cpu'] > self.num_cpu:
             free_cpus = self.num_cpu
@@ -72,6 +92,7 @@ class Node:
         self.free_cpus = free_cpus
         self.free_gpus = free_gpus
         return gpu and cpu, ret_cpu, ret_gpu
+
 
 
 class Switch:
@@ -178,17 +199,17 @@ class Switch:
     def slurm_alloc_res(self, job, nodes):
         num_gpu_p_node = job['num_gpu_p_node']
         num_node = job['num_node']
+        gpu_ids = []
         for nid in nodes:
-            node = self.node_list[nid]
-            node.free_gpus -= num_gpu_p_node
-            node.free_cpus -= num_cpu_p_node
-            node.jobs.append(job['jid'])
+            gid = self.node_list[nid].alloc_job(job['jid'], num_gpu_p_node, num_cpu_p_node)
             self.free_gpus -= num_gpu_p_node
             self.free_cpus -= num_cpu_p_node
+            gpu_ids.append(gid)
 
         create_node_placement(job, self.id, nodes,
                               [num_gpu_p_node]*num_node,
-                              [num_cpu_p_node]*num_node)
+                              [num_cpu_p_node]*num_node,
+                              gpu_ids)
 
 """
 mata data of cluster: Cluster -> Switch -> Node -> GPU

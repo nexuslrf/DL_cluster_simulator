@@ -33,7 +33,7 @@ def generate_trace_json(jobs, file='tracing.json'):
             'num_node': job['num_node'],
             'num_gpu': job['num_gpu'],
             'job_name': job['model'],
-            'switch': str(job['placements']),
+            'placements': str(job['placements']),
         }
         job_trace['traceEvents'].append(issue_entry)
         job_trace['traceEvents'].append(run_entry)
