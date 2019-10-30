@@ -16,6 +16,10 @@ def create_node_placement(job, switch_id, node_ids, num_gpus, num_cpus, gpu_ids=
         num_gpus = [num_gpus, ]
     if gpu_ids is None:
         gpu_ids = [None] * len(node_ids)
+
+    if 'placements' not in job:
+        job['placements'] = []
+
     sw_place = dict()
     sw_place['switch'] = switch_id
     sw_place['nodes'] = []
@@ -30,8 +34,6 @@ def create_node_placement(job, switch_id, node_ids, num_gpus, num_cpus, gpu_ids=
         # node_place['network']
         sw_place['nodes'].append(node_place)
 
-    if 'placements' not in job:
-        job['placements'] = []
     job['placements'].append(sw_place)
 
 
@@ -94,7 +96,6 @@ class Node:
         return gpu and cpu, ret_cpu, ret_gpu
 
 
-
 class Switch:
     def __init__(self, idx=0, node_list=None, name=None, **kwargs):
         if node_list is None:
@@ -141,7 +142,7 @@ class Switch:
                 return False, ret_cpu, ret_gpu
         return True, ret_cpu, ret_gpu
 
-    def slurm_get_res(self, job, nlist=None):
+    def get_res(self, job, nlist=None, policy='first-fit'):
         r"""
         alloc res from a single switch
         :param nlist:
@@ -151,14 +152,14 @@ class Switch:
         # @TODO consider ps-worker network load!
         need_node = job['num_node']
         if need_node == 1:  # non-distributed
-            return self.try_single_node_alloc(job, nlist)
+            return self.try_single_node_alloc(job, nlist, policy)
         elif need_node > 1:
-            return self.try_cross_node_alloc(job, nlist)
+            return self.try_cross_node_alloc(job, nlist, policy)
         else:
             print("Invalid node number for job[{}]".format(job['jid']))
-            return False, list()  # @TODO
+            return False, list()
 
-    def try_cross_node_alloc(self, job, nlist=None):
+    def try_cross_node_alloc(self, job, nlist=None, policy='first-fit'):
         need_gpu = job['num_gpu']
         need_node = job['num_node']
         need_gpu_p_node = job['num_gpu_p_node']
@@ -173,19 +174,21 @@ class Switch:
             if node.free_gpus >= need_gpu_p_node and node.free_cpus >= num_cpu_p_node:
                 possible_nodes.append(node.id)
                 node_cnt += 1
-                if node_cnt == need_node:
-                    break
-
-        if node_cnt == need_node:
-            return True, possible_nodes
+                if node_cnt == need_node and policy == 'first-fit':
+                    return True, possible_nodes
+        if node_cnt >= need_node:  # best-fit policy
+            possible_nodes.sort(key=lambda x: self.node_list[x].free_gpus)
+            return True, possible_nodes[:need_node]
         else:
             return False, possible_nodes
 
-    def try_single_node_alloc(self, job, nlist=None):
+    def try_single_node_alloc(self, job, nlist=None, policy='first-fit'):
         need_gpu = job['num_gpu']
         # @NOTE each job is assigned 4 cores per node
         # @TODO may perform like Tiresias for num of CPU
         need_cpu = 4
+        best_node = -1
+        best_node_use = 10000
         if self.free_gpus < need_gpu or self.free_cpus < need_cpu:
             return False, list()
         # @TODO finer grained placement policy?
@@ -193,10 +196,18 @@ class Switch:
             if nlist is not None and node.id not in nlist:
                 continue
             if node.free_gpus >= need_gpu and node.free_cpus >= need_cpu:
-                return True, [node.id]
-        return False, list()
+                if policy == 'first-fit':
+                    return True, [node.id]
+                elif policy == 'best-fit':
+                    if node.free_gpus < best_node_use:
+                        best_node_use = node.free_gpus
+                        best_node = node.id
+        if best_node < 0:
+            return False, list()
+        else:
+            return True, [best_node]
 
-    def slurm_alloc_res(self, job, nodes):
+    def alloc_res(self, job, nodes):
         num_gpu_p_node = job['num_gpu_p_node']
         num_node = job['num_node']
         gpu_ids = []
@@ -275,7 +286,7 @@ class Cluster:
         self.free_cpus = self.num_cpu
 
     # @TODO partition based alloc!
-    def try_alloc_res(self, job, policy='slurm'):
+    def try_alloc_res(self, job, policy='first-fit'):
         r"""
         placements:
         list of switches: -> list of nodes
@@ -284,16 +295,18 @@ class Cluster:
         :param job:
         :return:
         """
-        if policy == 'slurm':
-            ret = self.slurm_placement(job)
+        if policy == 'first-fit':
+            ret = self.first_fit_placement(job)
+        elif policy == 'best-fit':
+            ret = self.best_fit_placement(job)
         else:
-            ret = self.slurm_placement(job)
+            return False
         return ret
 
-    def slurm_placement(self, job):
+    def first_fit_placement(self, job):
         r"""
-        slurm: 1. try to alloc res from one switch, intra-switch
-               2. see the possibilities of inter-switch alloc
+        first-fit: 1. try to alloc res from one switch, intra-switch
+                   2. see the possibilities of inter-switch alloc
         :param job:
         :return:
         """
@@ -309,12 +322,12 @@ class Cluster:
                     continue
                 else:
                     nlist = self.partitions[job['partition']][switch.id]
-            done, nodes = switch.slurm_get_res(job, nlist)
+            done, nodes = switch.get_res(job, nlist, 'first-fit')
             if done:
                 self.free_gpus -= job['num_gpu']
                 self.free_cpus -= job['num_node'] * num_cpu_p_node
                 # real alloc res
-                switch.slurm_alloc_res(job, nodes)
+                switch.alloc_res(job, nodes)
                 return True
             elif len(nodes) > 0:
                 sw_nodes.append(nodes)
@@ -324,10 +337,48 @@ class Cluster:
                     for sw, nlist in zip(possible_sw, sw_nodes):
                         need_node -= len(nlist)
                         nlist = nlist[:need_node] if need_node < 0 else nlist
-                        self.switch_list[sw].slurm_alloc_res(job, nlist)
+                        self.switch_list[sw].alloc_res(job, nlist)
                     self.free_gpus -= job['num_gpu']
                     self.free_cpus -= job['num_node'] * num_cpu_p_node
                     return True
+        return False
+
+    def best_fit_placement(self, job):
+        r"""
+        best-fit: 1. single switch
+        :param job:
+        :return:
+        """
+        nodes_cnt = 0
+        nlist = None
+        need_node = job['num_node']
+        possible_choice = []
+
+        for switch in self.switch_list:
+            if self.use_partition:
+                if switch.id not in self.partitions[job['partition']]:
+                    continue
+                else:
+                    nlist = self.partitions[job['partition']][switch.id]
+            done, nodes = switch.get_res(job, nlist, 'best-fit')
+
+            if len(nodes) > 0:
+                possible_choice += [(switch.id, nid) for nid in nodes]
+                nodes_cnt += len(nodes)
+
+        if nodes_cnt >= need_node:
+            possible_choice.sort(key=lambda x: self.switch_list[x[0]].node_list[x[1]].free_gpus)
+            sw_nid = dict()
+            for sw, nid in possible_choice[:need_node]:
+                if sw not in sw_nid:
+                    sw_nid[sw] = []
+                sw_nid[sw].append(nid)
+            for sw, nlist in sw_nid.items():
+                self.switch_list[sw].alloc_res(job, nlist)
+            self.free_gpus -= job['num_gpu']
+            self.free_cpus -= job['num_node'] * num_cpu_p_node
+            return True
+
         return False
 
     def release_job_res(self, job):

@@ -6,17 +6,21 @@ import json
 import copy
 from cluster import Node, Switch, Cluster, Partition
 from matplotlib.patches import Circle, Rectangle
-from matplotlib.widgets import Slider, Button, RadioButtons
+from matplotlib.widgets import Slider, Button, RadioButtons, TextBox
 from matplotlib import animation
 import numpy as np
 import bisect
+import argparse
 
 r"""
 To show vis of the topology at a given time, we have to keep a json of cluster state of every event step. 
 Json format:
     {event_time, pending_jobs, running_jobs, used_nodes {sw_id, node_id, used_gpu, used_cpu} }  
 """
-
+parser = argparse.ArgumentParser()
+parser.add_argument('--cluster_log', default='cluster_log_fifo_best-fit.json', type=str)
+parser.add_argument('--trace', default='tracing_fifo_best-fit.json', type=str)
+args = parser.parse_args()
 
 def event_log(logger, event_time, jobs):
     r"""
@@ -55,7 +59,7 @@ def cluster_visualization(cluster, logger, trace, d=4, fig_w=12, node_h=15, node
     h = d / 4 * 3
     lh = h / 3
     # fig, ax = plt.subplots(1, 1, figsize=(fig_w, fig_w / node_w / d * node_h * h), dpi=80)
-    fig = plt.figure(figsize=(fig_w*1.5, fig_w / node_w / d * node_h * h), dpi=80, constrained_layout=True)
+    fig = plt.figure(figsize=(fig_w*1.5, fig_w / node_w / d * node_h * h * 1.2), dpi=80, constrained_layout=True)
     fig.suptitle("Deep Learning Cluster Simulation -- {} Schedule".format(schedule))
     gs = fig.add_gridspec(2, 3)
     ax = fig.add_subplot(gs[:, :-1])
@@ -221,18 +225,37 @@ def cluster_visualization(cluster, logger, trace, d=4, fig_w=12, node_h=15, node
             anim.event_source.stop()
             anim_pause = False
 
+    def text_submit(val):
+        val = eval(val)
+        time_slider.set_val(val)
+
+    def key_respond(event):
+        if event.key == 'a':
+            val = event_idx_slider.val
+            event_idx_slider.set_val(max(0, val-1))
+        elif event.key == 'd':
+            val = event_idx_slider.val
+            event_idx_slider.set_val(min(len(timeline), val+1))
+
     time_slider.on_changed(update_time)
     event_idx_slider.on_changed(update_event)
 
     # animation button
-    ax_run = fig.add_axes([0.85, 0.07, 0.12, 0.03], facecolor=axcolor)
+    ax_run = fig.add_axes([0.85, 0.03, 0.12, 0.03], facecolor=axcolor)
     run_button = Button(ax_run, 'Run Sim!')
     run_button.on_clicked(animate_button)
+
+    ax_txt = fig.add_axes([0.90, 0.1, 0.07, 0.03], facecolor=axcolor)
+    textbox = TextBox(ax_txt, 'Event Time')
+    textbox.on_submit(text_submit)
 
     # # cbar_ax2 = fig.add_axes([0.85, 0.2, 0.05, 0.75])
     # cbar_ax2 = fig.add_axes([0.9, 0.20, 0.05, 0.60])
     # # cbar = fig.colorbar(sca, cax=cbar_ax2, ticks=[0, 4, 9, 14, 19])
     # cbar = fig.colorbar(cm.ScalarMappable(cmap=cmap), cax=cbar_ax2)
+
+    fig.canvas.mpl_connect('key_press_event', key_respond)
+
     plt.show()
 
 
@@ -240,4 +263,4 @@ if __name__ == '__main__':
     cluster = Cluster()
     cluster.init_from_csv('Cluster_Info/cluster_info.csv')
     partition = Partition(cluster, 'Cluster_Info/sinfo.csv')
-    cluster_visualization(cluster, 'cluster_log_fifo.json', 'tracing_fifo.json')
+    cluster_visualization(cluster, args.cluster_log, args.trace)

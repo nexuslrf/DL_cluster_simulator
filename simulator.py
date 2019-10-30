@@ -36,11 +36,11 @@ def main():
     jobs.init_events_from_jobs()
     # Start sim
     if args.schedule == 'fifo':
-        scheduling.fifo_sim(cluster, jobs, logger)
+        scheduling.fifo_sim(cluster, jobs, logger, policy=args.placement_policy)
     if args.schedule == 'sjf':
-        scheduling.sjf_sim(cluster, jobs, logger)
+        scheduling.sjf_sim(cluster, jobs, logger, policy=args.placement_policy)
     if args.schedule == 'lsf':
-        scheduling.lsf_sim(cluster, jobs, logger)
+        scheduling.lsf_sim(cluster, jobs, logger, policy=args.placement_policy)
 
     print('{} Average Waiting Time: {}'.format(args.schedule, avg_pending_time(jobs.submit_jobs)))
 
