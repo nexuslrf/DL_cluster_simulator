@@ -9,6 +9,7 @@ class JobEvents:
     def __init__(self, verbose=False):
         self.submit_jobs = []
         self.pending_jobs = []
+        self.pending_queue = dict()
         self.running_jobs = []
         self.finished_jobs = []  # including both completed ones and failed ones
         self.end_jobs = []
@@ -34,8 +35,12 @@ class JobEvents:
             job['state'] = "UNISSUED"
             job['num_gpu_p_node'] = (job['num_gpu'] - 1) // job['num_node'] + 1
             job['num_gpu'] = job['num_gpu_p_node'] * job['num_node']
+            if 'partition' in job and job['partition'] not in self.pending_queue:
+                self.pending_queue[job['partition']] = []
             self.submit_jobs.append(job)
         # self.submit_jobs.sort(key=lambda t: t['submit_time'])
+        if len(self.pending_queue) == 0:
+            self.pending_queue['all'] = []
         self.submit_jobs = {job['jid']: job for job in self.submit_jobs}
 
     def init_events_from_jobs(self):
@@ -50,6 +55,7 @@ class JobEvents:
                 tmp_event['time'] = job['submit_time']
                 tmp_event['start_jobs'] = [jid, ]
                 tmp_event['end_jobs'] = []
+                tmp_event['preempt_jobs'] = []
                 event_dict[job['submit_time']] = tmp_event
             else:
                 event_dict[job['submit_time']]['start_jobs'].append(jid)
@@ -57,11 +63,29 @@ class JobEvents:
         self.events = [item for _, item in event_dict.items()]
         self.events.sort(key=lambda t: t['time'])
 
+    def init_multilevel_queue(self, num_q):
+        for k in self.pending_queue.keys():
+            self.pending_queue[k] = [[] for i in range(num_q)]
+
+    def release_multilevel_queue(self):
+        for k in self.pending_queue.keys():
+            self.pending_queue[k] = []
+
     def pend_jobs(self, job):
         if type(job) != dict:
             job = self.submit_jobs[job]
         job['state'] = 'PENDING'
         self.pending_jobs.append(job['jid'])
+        if 'partition' in job:
+            if 'qid' in job:
+                self.pending_queue[job['partition']][qid].append(job['jid'])
+            else:
+                self.pending_queue[job['partition']].append(job['jid'])
+        else:
+            if 'qid' in job:
+                self.pending_queue['all'][job['qid']].append(job['jid'])
+            else:
+                self.pending_queue['all'].append(job['jid'])
         self.print_verbose('time[{}]\tjob[{}] PENDING'.format(job['submit_time'], job['jid']))
 
     def issue_jobs(self, job, issue_time):
@@ -79,7 +103,24 @@ class JobEvents:
         job['end_time'] = issue_time + job['running_time']
         job['pending_time'] = job['start_time'] - job['submit_time']
         self.pending_jobs.remove(job['jid'])
+        if 'partition' in job:
+            if 'qid' in job:
+                self.pending_queue[job['partition']][job['qid']].remove(job['jid'])
+            else:
+                self.pending_queue[job['partition']].remove(job['jid'])
+        else:
+            if 'qid' in job:
+                self.pending_queue['all'][job['qid']].remove(job['jid'])
+            else:
+                self.pending_queue['all'].remove(job['jid'])
+
         self.print_verbose('time[{}]\tjob[{}] RUNNING'.format(issue_time, job['jid']))
+
+        # For preemption/MFQ
+        if 'qid' in job:
+            if 'start_time_list' not in job:
+                job['start_time_list'] = []
+            job['start_time_list'].append(issue_time)
 
     def finish_jobs(self, state, job):
         if type(job) != dict:
@@ -88,6 +129,28 @@ class JobEvents:
         self.running_jobs.remove(job['jid'])
         self.finished_jobs.append(job['jid'])
         self.print_verbose("time[{}]\tjob[{}] {}".format(job['end_time'], job['jid'], state))
+
+    def add_preemptions(self, job, preempt_time):
+        insert = True
+        index = len(self.events)
+        for i, event in enumerate(self.events[self.PC:]):
+            if event['time'] == preempt_time:
+                event['preempt_jobs'].append(job['jid'])
+                insert = False
+                break
+            elif event['time'] > preempt_time:
+                index = i + self.PC
+                break
+        if insert:
+            tmp_event = dict()
+            tmp_event['time'] = preempt_time
+            tmp_event['start_jobs'] = []
+            tmp_event['end_jobs'] = []
+            tmp_event['preempt_jobs'] = [job['jid'], ]
+            self.events.insert(index, tmp_event)
+        if 'preempt_time' not in job:
+            job['preempt_time'] = []
+        job['preempt_time'].append(preempt_time)
 
     def check_overload(self):
         if len(self.pending_jobs) > 0 and len(self.running_jobs) == 0:

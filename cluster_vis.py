@@ -11,16 +11,15 @@ from matplotlib import animation
 import numpy as np
 import bisect
 import argparse
+from opt import opt
+args = opt
 
 r"""
 To show vis of the topology at a given time, we have to keep a json of cluster state of every event step. 
 Json format:
     {event_time, pending_jobs, running_jobs, used_nodes {sw_id, node_id, used_gpu, used_cpu} }  
 """
-parser = argparse.ArgumentParser()
-parser.add_argument('--cluster_log', default='cluster_log_fifo_best-fit.json', type=str)
-parser.add_argument('--trace', default='tracing_fifo_best-fit.json', type=str)
-args = parser.parse_args()
+
 
 def event_log(logger, event_time, jobs):
     r"""
@@ -263,4 +262,4 @@ if __name__ == '__main__':
     cluster = Cluster()
     cluster.init_from_csv('Cluster_Info/cluster_info.csv')
     partition = Partition(cluster, 'Cluster_Info/sinfo.csv')
-    cluster_visualization(cluster, args.cluster_log, args.trace)
+    cluster_visualization(cluster, args.logger_file, args.chrome_trace_file)

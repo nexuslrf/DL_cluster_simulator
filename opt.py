@@ -10,6 +10,7 @@ parser.add_argument('--partition', default='Cluster_Info/sinfo.csv', type=str)
 parser.add_argument('--logger_file', default='cluster_log_fifo_best-fit.json', type=str)
 parser.add_argument('--chrome_trace_file', default='tracing_fifo_best-fit.json', type=str)
 parser.add_argument('--placement_policy', default='best-fit', type=str)
+args = parser.parse_args()
 # parser.add_argument()
 
 opt = parser.parse_args()
