@@ -5,13 +5,14 @@ import colorcet as cc
 import json
 import copy
 from cluster import Node, Switch, Cluster, Partition
-from matplotlib.patches import Circle, Rectangle
+from matplotlib.patches import Circle, Rectangle, FancyArrowPatch
 from matplotlib.widgets import Slider, Button, RadioButtons, TextBox
 from matplotlib import animation
 import numpy as np
 import bisect
 import argparse
 from opt import opt
+
 args = opt
 
 r"""
@@ -21,7 +22,7 @@ Json format:
 """
 
 
-def event_log(logger, event_time, jobs):
+def event_log(logger, event_time, jobs, track_nodes=False):
     r"""
     :param event_time:
     :param logger: list of dict
@@ -30,35 +31,45 @@ def event_log(logger, event_time, jobs):
     :return:
     """
     event = dict()
-    event['event_time'] = event_time
-    event['pending_jobs'] = copy.deepcopy(jobs.pending_jobs)
-    event['running_jobs'] = copy.deepcopy(jobs.running_jobs)
-    used_nodes = dict()
-    for jid in jobs.running_jobs:
-        job = jobs.submit_jobs[jid]
-        for place in job['placements']:
-            for node in place['nodes']:
-                name = f"{place['switch']}_{node['id']}"
-                if name not in used_nodes:
-                    used_nodes[name] = {'switch_id': place['switch'], 'node_id': node['id'],
-                                        'used_gpu': node['num_gpu'], 'used_cpu': node['num_cpu'],}
-                else:
-                    used_nodes[name]['used_gpu'] += node['num_gpu']
-                    used_nodes[name]['used_cpu'] += node['num_cpu']
+    event['time'] = event_time
+    event['p_jobs'] = copy.deepcopy(jobs.pending_jobs)
+    event['r_jobs'] = copy.deepcopy(jobs.running_jobs)
 
-    event['used_nodes'] = [val for k, val in used_nodes.items()]
+    if track_nodes:
+        used_nodes = dict()
+        for jid in jobs.running_jobs:
+            job = jobs.submit_jobs[jid]
+            for place in job['placements']:
+                for node in place['nodes']:
+                    name = f"{place['switch']}_{node['id']}"
+                    if name not in used_nodes:
+                        used_nodes[name] = {'sid': place['switch'], 'nid': node['id'],
+                                            'used_gpu': node['num_gpu'], 'used_cpu': node['num_cpu'], }
+                    else:
+                        used_nodes[name]['used_gpu'] += node['num_gpu']
+                        used_nodes[name]['used_cpu'] += node['num_cpu']
+
+        event['used_nodes'] = [val for k, val in used_nodes.items()]
+
     logger.append(event)
 
 
+def get_alloced_nodes(job_placements, time):
+    for res, s_t, e_t in job_placements:
+        if s_t <= time <= e_t:
+            return res
+    return []
+
+
 def cluster_visualization(cluster, logger, trace, d=4, fig_w=12, node_h=15, node_w=16, schedule='fifo', save='',
-                          frames=None):
+                          frames=None, draw_mitigate=True):
     r = d / 2
     l = d / 4
     border = d / 20
     h = d / 4 * 3
     lh = h / 3
     # fig, ax = plt.subplots(1, 1, figsize=(fig_w, fig_w / node_w / d * node_h * h), dpi=80)
-    fig = plt.figure(figsize=(fig_w*1.5, fig_w / node_w / d * node_h * h * 1.2), dpi=80, constrained_layout=True)
+    fig = plt.figure(figsize=(fig_w * 1.5, fig_w / node_w / d * node_h * h * 1.2), dpi=80, constrained_layout=True)
     fig.suptitle("Deep Learning Cluster Simulation -- {} Schedule".format(schedule))
     gs = fig.add_gridspec(2, 3)
     ax = fig.add_subplot(gs[:, :-1])
@@ -78,19 +89,23 @@ def cluster_visualization(cluster, logger, trace, d=4, fig_w=12, node_h=15, node
     if type(trace) == str:
         raw_trace = json.loads(open(trace).read())
         trace = dict()
-        for item in raw_trace['traceEvents'][1::2]:
+        for item in raw_trace['traceEvents']:
+            if 'placements' not in item['args']:
+                continue
             placements = json.loads(item['args']['placements'].replace('\'', '"'))
             tmp = []
             for sw in placements:
                 for nd in sw['nodes']:
                     for i in nd['gpu_assign']:
                         tmp.append('{}_{}_{}'.format(sw['switch'], nd['id'], i))
-            trace[item['tid']] = tmp
+            if item['tid'] not in trace:
+                trace[item['tid']] = []
+            trace[item['tid']].append((tmp, item['args']['s_t'], item['args']['e_t']))
         del raw_trace
 
-    timeline = [v['event_time'] for v in logger]
-    num_pending = [len(v['pending_jobs']) for v in logger]
-    num_running = [len(v['running_jobs']) for v in logger]
+    timeline = [v['time'] for v in logger]
+    num_pending = [len(v['p_jobs']) for v in logger]
+    num_running = [len(v['r_jobs']) for v in logger]
 
     ax_pending.plot(num_pending[:])
     ax_running.plot(num_running[:])
@@ -98,10 +113,11 @@ def cluster_visualization(cluster, logger, trace, d=4, fig_w=12, node_h=15, node
     row = 0
     par_n = 0
     gpu_to_rect = dict()
+    node_pos = dict()
     ticks = []
     frames = len(timeline) if frames is None else frames
     # norm = mpl.colors.Normalize(vmin=0, vmax=9)
-    cmap = cc.cm.glasbey #cm.get_cmap('gist_heat')
+    cmap = cc.cm.glasbey  # cm.get_cmap('gist_heat')
     call_time = True
     anim_pause = True
 
@@ -140,6 +156,8 @@ def cluster_visualization(cluster, logger, trace, d=4, fig_w=12, node_h=15, node
                 ax.text(col * d + r, row * h + 2 * lh, cluster.switch_list[sw].node_list[nid].name, color='w',
                         horizontalalignment='center', )  # verticalalignment='center')
 
+                node_pos[f'{sw}_{nid}'] = (col * d + r, row * h + 2 * lh)
+
                 col += 1
         row += 1
         ax.plot([0, node_w * d], [row * h, row * h], 'b--')
@@ -156,33 +174,64 @@ def cluster_visualization(cluster, logger, trace, d=4, fig_w=12, node_h=15, node
     event_idx_slider = Slider(axevent, 'Event Index', -1, len(timeline), valinit=0, valstep=1)
 
     anim = None
-    running_jobs = []
+    running_gpus = []
+    gpu_j_map = dict()
+    j_node_map = dict()
+    links = []
 
     def init():
         for k, cir in gpu_to_rect.items():
             cir.set_color('w')
 
     def update_time(time):
-        nonlocal call_time
+        nonlocal call_time, j_node_map
         # time = time_slider.val
         # init()
         if time >= timeline[0]:
             idx = bisect.bisect_right(timeline, time) - 1
             call_time = False
             event_idx_slider.set_val(idx)
-            new_jobs = logger[idx]['running_jobs']
-            for j in running_jobs:
-                if j not in new_jobs:
-                    for g in trace[j]:
-                        gpu_to_rect[g].set_color('w')
-            running_jobs[:] = logger[idx]['running_jobs'][:]
-            for j in running_jobs:
-                for g in trace[j]:
-                    gpu_to_rect[g].set_color(cmap(j % cmap.N))
+            new_gpus = []
+            new_j_node_map = dict()
+            if draw_mitigate:
+                while len(links) > 0:
+                    arc = links.pop()
+                    arc.remove()
+
+            for j in logger[idx]['r_jobs']:
+                j_gpu = get_alloced_nodes(trace[j], timeline[idx] + 0.1)
+                new_gpus += j_gpu
+                new_j_node_map[j] = set()
+                for g in j_gpu:
+                    gpu_j_map[g] = j
+                    new_j_node_map[j].add(g[:-2])
+                if draw_mitigate:
+                    if j in j_node_map:
+                        new_nodes = list(new_j_node_map[j] - j_node_map[j])
+                        old_nodes = list(j_node_map[j] - new_j_node_map[j])
+                        for nn, on in zip(new_nodes, old_nodes):
+                            arc = ax.annotate("", xy=node_pos[nn], xytext=node_pos[on],
+                                              arrowprops=dict(arrowstyle="->", color=cmap(j % cmap.N), alpha=0.8,
+                                                              shrinkA=5, shrinkB=5,
+                                                              patchA=None, patchB=None,
+                                                              connectionstyle="arc3,rad=0.3",
+                                                              ),
+                                              )
+                            links.append(arc)
+
+            j_node_map = new_j_node_map
+
+            for g in running_gpus:
+                if g not in new_gpus:
+                    gpu_to_rect[g].set_color('w')
+            running_gpus[:] = new_gpus[:]
+            for g in running_gpus:
+                gpu_to_rect[g].set_color(cmap(gpu_j_map[g] % cmap.N))
+
             ax_pending.cla()
-            ax_pending.plot(num_pending[:idx+1])
+            ax_pending.plot(num_pending[:idx + 1])
             ax_running.cla()
-            ax_running.plot(num_running[:idx+1])
+            ax_running.plot(num_running[:idx + 1])
             ax_pending.set_title('#Pending Jobs')
             ax_running.set_title('#Running Jobs')
             ax_running.set_xlabel('Event_Idx')
@@ -231,10 +280,10 @@ def cluster_visualization(cluster, logger, trace, d=4, fig_w=12, node_h=15, node
     def key_respond(event):
         if event.key == 'a':
             val = event_idx_slider.val
-            event_idx_slider.set_val(max(0, val-1))
+            event_idx_slider.set_val(max(0, val - 1))
         elif event.key == 'd':
             val = event_idx_slider.val
-            event_idx_slider.set_val(min(len(timeline), val+1))
+            event_idx_slider.set_val(min(len(timeline), val + 1))
 
     time_slider.on_changed(update_time)
     event_idx_slider.on_changed(update_event)

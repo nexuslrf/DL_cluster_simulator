@@ -54,8 +54,6 @@ class JobEvents:
             if job['submit_time'] not in event_dict:
                 tmp_event['time'] = job['submit_time']
                 tmp_event['start_jobs'] = [jid, ]
-                tmp_event['end_jobs'] = []
-                tmp_event['preempt_jobs'] = []
                 event_dict[job['submit_time']] = tmp_event
             else:
                 event_dict[job['submit_time']]['start_jobs'].append(jid)
@@ -78,7 +76,7 @@ class JobEvents:
         self.pending_jobs.append(job['jid'])
         if 'partition' in job:
             if 'qid' in job:
-                self.pending_queue[job['partition']][qid].append(job['jid'])
+                self.pending_queue[job['partition']][job['qid']].append(job['jid'])
             else:
                 self.pending_queue[job['partition']].append(job['jid'])
         else:
@@ -120,7 +118,14 @@ class JobEvents:
         if 'qid' in job:
             if 'start_time_list' not in job:
                 job['start_time_list'] = []
+                job['executed_time'] = 0
+                job['total_pending_time'] = job['pending_time']
+            else:
+                job['executed_time'] += (job['preempt_time'][-1] - job['start_time_list'][-1])
+                job['total_pending_time'] += (issue_time - job['preempt_time'][-1])
             job['start_time_list'].append(issue_time)
+            job['end_time'] -= job['executed_time']
+            job['pending_time'] = job['total_pending_time']
 
     def finish_jobs(self, state, job):
         if type(job) != dict:
@@ -130,52 +135,41 @@ class JobEvents:
         self.finished_jobs.append(job['jid'])
         self.print_verbose("time[{}]\tjob[{}] {}".format(job['end_time'], job['jid'], state))
 
-    def add_preemptions(self, job, preempt_time):
+    def pause_jobs(self, job, event_time):
+        if type(job) != dict:
+            job = self.submit_jobs[job]
+        self.running_jobs.remove(job['jid'])
+        if 'preempt_time' not in job:
+            job['preempt_time'] = []
+            job['placements_history'] = []
+        job['preempt_time'].append(event_time)
+        job['placements_history'].append(job.pop('placements'))
+        self.print_verbose("time[{}]\tjob[{}] Pause".format(event_time, job['jid']))
+
+    def add_event(self, job, event_time, event_type='end'):
         insert = True
         index = len(self.events)
         for i, event in enumerate(self.events[self.PC:]):
-            if event['time'] == preempt_time:
-                event['preempt_jobs'].append(job['jid'])
+            if event['time'] == event_time:
+                if event_type not in event:
+                    event[event_type] = []
+                event[event_type].append(job['jid'])
                 insert = False
                 break
-            elif event['time'] > preempt_time:
+            elif event['time'] > event_time:
                 index = i + self.PC
                 break
         if insert:
             tmp_event = dict()
-            tmp_event['time'] = preempt_time
-            tmp_event['start_jobs'] = []
-            tmp_event['end_jobs'] = []
-            tmp_event['preempt_jobs'] = [job['jid'], ]
+            tmp_event['time'] = event_time
+            tmp_event[event_type] = [job['jid'], ]
             self.events.insert(index, tmp_event)
-        if 'preempt_time' not in job:
-            job['preempt_time'] = []
-        job['preempt_time'].append(preempt_time)
 
     def check_overload(self):
         if len(self.pending_jobs) > 0 and len(self.running_jobs) == 0:
             return True
         else:
             return False
-
-    def add_end_events(self, job):
-        end_time = job['end_time']
-        insert = True
-        index = len(self.events)
-        for i, event in enumerate(self.events[self.PC:]):
-            if event['time'] == end_time:
-                event['end_jobs'].append(job['jid'])
-                insert = False
-                break
-            elif event['time'] > end_time:
-                index = i + self.PC
-                break
-        if insert:
-            tmp_event = dict()
-            tmp_event['time'] = end_time
-            tmp_event['start_jobs'] = []
-            tmp_event['end_jobs'] = [job['jid'], ]
-            self.events.insert(index, tmp_event)
 
     def report(self):
         print(f"PENDING: {len(self.pending_jobs)}\tRUNNING: {len(self.running_jobs)}")
