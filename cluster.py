@@ -1,5 +1,8 @@
 import csv
+
 num_cpu_p_node = 4
+penalty = 0.0
+penalty_free_gpu = 0.0
 """
 cluster class: to represent the cluster info
 """
@@ -61,7 +64,7 @@ class Node:
         self.jobs[jid] = []
         cnt = 0
         for i in range(self.num_gpu):
-            if self.used_gpu[i]<0:
+            if self.used_gpu[i] < 0:
                 self.used_gpu[i] = jid
                 cnt += 1
                 self.jobs[jid].append(i)
@@ -95,6 +98,9 @@ class Node:
         self.free_gpus = free_gpus
         return gpu and cpu, ret_cpu, ret_gpu
 
+    def idle(self):
+        return self.free_cpus == self.num_cpu
+
 
 class Switch:
     def __init__(self, idx=0, node_list=None, name=None, **kwargs):
@@ -117,6 +123,7 @@ class Switch:
                 self.num_cpu = sum(node.num_cpu for node in self.node_list)
         self.free_cpus = self.num_cpu
         self.free_gpus = self.num_gpu
+        self.free_node = self.num_node
 
     def add(self, **kwargs):
         newNode = Node(idx=self.num_node, **kwargs)  # idx=kwargs['node_id']
@@ -126,38 +133,45 @@ class Switch:
         self.node_list.append(newNode)
         self.free_gpus += newNode.num_gpu
         self.free_cpus += newNode.num_cpu
+        self.free_node += 1
 
     def release_job_res(self, jid, nodes):
         ret_cpu = 0
         ret_gpu = 0
+        ret_node = 0
         for node in nodes:
             if ('id' not in node) or ('num_gpu' not in node) or ('num_cpu' not in node):
-                return False, ret_cpu, ret_gpu
+                return False, ret_cpu, ret_gpu, ret_node
             done, cpus, gpus = self.node_list[node['id']].release_job_res(jid, node)
             ret_gpu += gpus
             ret_cpu += cpus
             self.free_cpus += cpus
             self.free_gpus += gpus
+            if self.node_list[node['id']].idle():
+                self.free_node += 1
+                ret_node += 1
             if not done:
-                return False, ret_cpu, ret_gpu
-        return True, ret_cpu, ret_gpu
+                return False, ret_cpu, ret_gpu, ret_node
+        return True, ret_cpu, ret_gpu, ret_node
 
-    def get_res(self, job, nlist=None, policy='first-fit'):
+    def get_res(self, job, nlist=None, policy='first-fit', free_gpu = False):
         r"""
         alloc res from a single switch
         :param nlist:
         :param job:
         :return:
         """
-        # @TODO consider ps-worker network load!
-        need_node = job['num_node']
-        if need_node == 1:  # non-distributed
-            return self.try_single_node_alloc(job, nlist, policy)
-        elif need_node > 1:
-            return self.try_cross_node_alloc(job, nlist, policy)
+        if free_gpu:
+            return self.try_free_gpu_alloc(job, nlist, policy)
         else:
-            print("Invalid node number for job[{}]".format(job['jid']))
-            return False, list()
+            need_node = job['num_node']
+            if need_node == 1:  # non-distributed
+                return self.try_single_node_alloc(job, nlist, policy)
+            elif need_node > 1:
+                return self.try_cross_node_alloc(job, nlist, policy)
+            else:
+                print("Invalid node number for job[{}]".format(job['jid']))
+                return False, list()
 
     def try_cross_node_alloc(self, job, nlist=None, policy='first-fit'):
         need_gpu = job['num_gpu']
@@ -176,8 +190,8 @@ class Switch:
                 node_cnt += 1
                 if node_cnt == need_node and policy == 'first-fit':
                     return True, possible_nodes
+        possible_nodes.sort(key=lambda x: self.node_list[x].free_gpus)
         if node_cnt >= need_node:  # best-fit policy
-            possible_nodes.sort(key=lambda x: self.node_list[x].free_gpus)
             return True, possible_nodes[:need_node]
         else:
             return False, possible_nodes
@@ -207,20 +221,72 @@ class Switch:
         else:
             return True, [best_node]
 
-    def alloc_res(self, job, nodes):
+    def try_free_gpu_alloc(self, job, nlist=None, policy='first-fit'):
+        need_gpu = job['num_gpu']
+        num_cpu_p_node = 4
+        possible_nodes = []
+        gpu_cnt = 0
+        if self.free_gpus == 0:
+            return False, list(), gpu_cnt
+
+        # @TODO finer grained placement policy?
+        for node in self.node_list:
+            if nlist is not None and node.id not in nlist:
+                continue
+            if node.free_gpus > 0 and node.free_cpus >= num_cpu_p_node:
+                possible_nodes.append(node.id)
+                gpu_cnt += node.free_gpus
+                if policy == 'first-fit' and gpu_cnt > need_gpu:
+                    return True, possible_nodes, gpu_cnt
+        if policy == 'comm-first':
+            possible_nodes.sort(key=lambda x: self.node_list[x].free_gpus, reverse=True)
+        elif policy == 'frag-first':
+            possible_nodes.sort(key=lambda x: self.node_list[x].free_gpus)
+        if gpu_cnt >= need_gpu:  # best-fit policy
+            return True, possible_nodes, gpu_cnt
+        else:
+            return False, possible_nodes, gpu_cnt
+
+    def alloc_res(self, job, nodes, free_gpu=False):
         num_gpu_p_node = job['num_gpu_p_node']
         num_node = job['num_node']
         gpu_ids = []
-        for nid in nodes:
-            gid = self.node_list[nid].alloc_job(job['jid'], num_gpu_p_node, num_cpu_p_node)
-            self.free_gpus -= num_gpu_p_node
-            self.free_cpus -= num_cpu_p_node
-            gpu_ids.append(gid)
+        used_node = 0
+        used_cpu = 0
+        gpu_list = []
+        if not free_gpu:
+            for nid in nodes:
+                if self.node_list[nid].free_cpus == self.node_list[nid].num_cpu:
+                    self.free_node -= 1
+                    used_node += 1
+                gid = self.node_list[nid].alloc_job(job['jid'], num_gpu_p_node, num_cpu_p_node)
+                self.free_gpus -= num_gpu_p_node
+                self.free_cpus -= num_cpu_p_node
+                used_cpu += num_cpu_p_node
+                gpu_ids.append(gid)
+                gpu_list.append(num_gpu_p_node)
 
-        create_node_placement(job, self.id, nodes,
-                              [num_gpu_p_node]*num_node,
-                              [num_cpu_p_node]*num_node,
+        else:
+            num_node = 0
+            for nid, n_gpu in nodes:
+                if self.node_list[nid].free_cpus == self.node_list[nid].num_cpu:
+                    self.free_node -= 1
+                    used_node += 1
+                gid = self.node_list[nid].alloc_job(job['jid'], n_gpu, num_cpu_p_node)
+                self.free_gpus -= n_gpu
+                self.free_cpus -= num_cpu_p_node
+                used_cpu += num_cpu_p_node
+                gpu_ids.append(gid)
+                gpu_list.append(n_gpu)
+                num_node += 1
+
+            nodes = [x[0] for x in nodes]
+
+        create_node_placement(job, self.id, nodes, gpu_list,
+                              [num_cpu_p_node] * num_node,
                               gpu_ids)
+        return used_node, used_cpu
+
 
 """
 mata data of cluster: Cluster -> Switch -> Node -> GPU
@@ -235,8 +301,10 @@ class Cluster:
         self.num_switch = len(switch_list)
         self.num_gpu = sum(switch.num_gpu for switch in switch_list)
         self.num_cpu = sum(switch.num_cpu for switch in switch_list)
+        self.num_node = sum(switch.num_node for switch in switch_list)
         self.free_gpus = self.num_gpu
         self.free_cpus = self.num_cpu
+        self.free_node = self.num_node
         self.use_partition = False
         self.partitions = None
 
@@ -282,8 +350,10 @@ class Cluster:
             exit()
         self.num_gpu = sum(switch.num_gpu for switch in self.switch_list)
         self.num_cpu = sum(switch.num_cpu for switch in self.switch_list)
+        self.num_node = sum(switch.num_node for switch in self.switch_list)
         self.free_gpus = self.num_gpu
         self.free_cpus = self.num_cpu
+        self.free_node = self.num_node
 
     # @TODO partition based alloc!
     def try_alloc_res(self, job, policy='first-fit'):
@@ -295,10 +365,13 @@ class Cluster:
         :param job:
         :return:
         """
+        job['penalty'] = 0.0
         if policy == 'first-fit':
             ret = self.first_fit_placement(job)
         elif policy == 'best-fit':
             ret = self.best_fit_placement(job)
+        elif policy == 'free-gpu':
+            ret = self.free_gpu_placement(job)
         else:
             return False
         return ret
@@ -327,7 +400,8 @@ class Cluster:
                 self.free_gpus -= job['num_gpu']
                 self.free_cpus -= job['num_node'] * num_cpu_p_node
                 # real alloc res
-                switch.alloc_res(job, nodes)
+                used_node = switch.alloc_res(job, nodes)
+                self.free_node -= used_node
                 return True
             elif len(nodes) > 0:
                 sw_nodes.append(nodes)
@@ -337,9 +411,11 @@ class Cluster:
                     for sw, nlist in zip(possible_sw, sw_nodes):
                         need_node -= len(nlist)
                         nlist = nlist[:need_node] if need_node < 0 else nlist
-                        self.switch_list[sw].alloc_res(job, nlist)
+                        used_node = self.switch_list[sw].alloc_res(job, nlist)
+                        self.free_node -= used_node
                     self.free_gpus -= job['num_gpu']
                     self.free_cpus -= job['num_node'] * num_cpu_p_node
+                    job['penalty'] =penalty
                     return True
         return False
 
@@ -363,36 +439,106 @@ class Cluster:
             done, nodes = switch.get_res(job, nlist, 'best-fit')
 
             if len(nodes) > 0:
-                possible_choice += [(switch.id, nid) for nid in nodes]
+                # possible_choice += [(switch.id, nid) for nid in nodes]
                 nodes_cnt += len(nodes)
+                possible_choice.append((switch.id, nodes))
 
         if nodes_cnt >= need_node:
-            possible_choice.sort(key=lambda x: self.switch_list[x[0]].node_list[x[1]].free_gpus)
+            possible_choice.sort(key=lambda x:
+                                 1000 * len(x[1]) + self.switch_list[x[0]].num_node - self.switch_list[x[0]].free_node,
+                                 reverse=True)
             sw_nid = dict()
-            for sw, nid in possible_choice[:need_node]:
-                if sw not in sw_nid:
-                    sw_nid[sw] = []
-                sw_nid[sw].append(nid)
+            if len(possible_choice[0][1]) < need_node:
+                job['penalty'] = penalty
+            for sw, nodes in possible_choice:
+                sw_nid[sw] = []
+                if len(nodes) < need_node:
+                    sw_nid[sw] += nodes
+                    need_node -= len(nodes)
+                else:
+                    sw_nid[sw] += nodes[:need_node]
+                    need_node = 0
+                if need_node == 0:
+                    break
             for sw, nlist in sw_nid.items():
-                self.switch_list[sw].alloc_res(job, nlist)
+                used_node = self.switch_list[sw].alloc_res(job, nlist)
+                self.free_node -= used_node
             self.free_gpus -= job['num_gpu']
             self.free_cpus -= job['num_node'] * num_cpu_p_node
             return True
 
         return False
 
+    def free_gpu_placement(self, job):
+        gpu_cnt = 0
+        nlist = None
+        need_gpu = job['num_gpu']
+        possible_choice = []
+
+        for switch in self.switch_list:
+            if self.use_partition:
+                if switch.id not in self.partitions[job['partition']]:
+                    continue
+                else:
+                    nlist = self.partitions[job['partition']][switch.id]
+            done, nodes, node_gpu = switch.get_res(job, nlist, 'comm-first', free_gpu=True)
+
+            if node_gpu > 0:
+                # possible_choice += [(switch.id, nid) for nid in nodes]
+                gpu_cnt += node_gpu
+                possible_choice.append((switch.id, nodes, node_gpu))
+
+        if gpu_cnt >= need_gpu:
+            possible_choice.sort(key=lambda x:
+                1000 * x[2] + self.switch_list[x[0]].num_node - self.switch_list[x[0]].free_node,
+                                 reverse=True)
+            sw_nid = dict()
+            if possible_choice[0][2] < need_gpu:
+                job['penalty'] = penalty_free_gpu
+            for sw, nodes, node_gpu in possible_choice:
+                sw_nid[sw] = []
+                for nid in nodes:
+                    tmp_gpu = self.switch_list[sw].node_list[nid].free_gpus
+                    if tmp_gpu < need_gpu:
+                        sw_nid[sw].append((nid, tmp_gpu))
+                        need_gpu = need_gpu - tmp_gpu
+                    else:
+                        sw_nid[sw].append((nid, need_gpu))
+                        need_gpu = 0
+                    if need_gpu == 0:
+                        break
+                if need_gpu == 0:
+                    break
+            for sw, nlist in sw_nid.items():
+                used_node, used_cpu = self.switch_list[sw].alloc_res(job, nlist, free_gpu=True)
+                self.free_node -= used_node
+                self.free_cpus -= used_cpu
+            self.free_gpus -= job['num_gpu']
+
+            return True
+
+        return False
+
     def release_job_res(self, job):
+        # cnt = 0
+        # a_n = 0
         for placement in job['placements']:
             if ('switch' not in placement) or ('nodes' not in placement):
                 return False
 
-            done, ret_cpu, ret_gpu = self.switch_list[placement['switch']].release_job_res(job['jid'],
+            done, ret_cpu, ret_gpu, ret_node = self.switch_list[placement['switch']].release_job_res(job['jid'],
                                                                                            placement['nodes'])
+            # cnt += ret_cpu
             # maintain metadata for cluster
             self.free_gpus += ret_gpu  # #gpus that are really idle!
             self.free_cpus += ret_cpu
+            self.free_node += ret_node
             if not done:
                 return False
+            # a_n += len(placement['nodes']) * 4
+
+        # if cnt != a_n:
+        #     print()
         return True
 
     def add(self, **kwargs):
@@ -421,7 +567,9 @@ class Cluster:
 
     def report(self):
         out_str = 'Cluster Report:'
-        out_str += f'Cluster:\t#GPU: {self.free_gpus}/{self.num_gpu}\t#CPU: {self.free_cpus}/{self.num_cpu}'
+        out_str += f'Cluster: \tNode: {self.free_node}/{self.num_node}' \
+                   f'\t#GPU: {self.free_gpus}/{self.num_gpu}' \
+                   f'\t#CPU: {self.free_cpus}/{self.num_cpu}'
         print(out_str)
 
 
@@ -429,6 +577,7 @@ class Partition:
     r"""
     sub-graph of cluster
     """
+
     def __init__(self, cluster, file='sinfo.csv'):
         r"""
         partitions -> switches dict -> list of node id
@@ -463,7 +612,7 @@ class Partition:
                         self.partitions[par][sw_id] = []
                     self.partitions[par][sw_id].append(n_id)
                     cluster.switch_list[sw_id].node_list[n_id].partition = par
-        cluster.partitions = self.partitions    # my ugly programming! :-(
+        cluster.partitions = self.partitions  # my ugly programming! :-(
 
     def get_id_name_map(self, default_par='Others'):
         for switch in self.cluster.switch_list:
@@ -478,7 +627,7 @@ class Partition:
             for sw_id, nlist in sw_dict.items():
                 switch = self.cluster.switch_list[sw_id]
                 out_str += f"|- Switch[{switch.id}]:\t{switch.name}\t#GPU: {switch.free_gpus}/{switch.num_gpu}\t" \
-                        f"#CPU: {switch.free_cpus}{switch.num_cpu}\n"
+                           f"#CPU: {switch.free_cpus}{switch.num_cpu}\n"
                 # out_str += "|  /" + 7 * '-' + '\n'
                 for n_id in nlist:
                     node = switch.node_list[n_id]
@@ -496,6 +645,7 @@ def main():
     print(cluster)
     partition = Partition(cluster, 'Cluster_Info/sinfo.csv')
     print(partition)
+
 
 if __name__ == '__main__':
     main()

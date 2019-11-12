@@ -33,6 +33,7 @@ class JobEvents:
         for job in reader:
             job = {key: eval(val) if val.isdigit() else val for (key, val) in job.items()}
             job['state'] = "UNISSUED"
+            job['penalty'] = 0.0
             job['num_gpu_p_node'] = (job['num_gpu'] - 1) // job['num_node'] + 1
             job['num_gpu'] = job['num_gpu_p_node'] * job['num_node']
             if 'partition' in job and job['partition'] not in self.pending_queue:
@@ -86,7 +87,7 @@ class JobEvents:
                 self.pending_queue['all'].append(job['jid'])
         self.print_verbose('time[{}]\tjob[{}] PENDING'.format(job['submit_time'], job['jid']))
 
-    def issue_jobs(self, job, issue_time):
+    def issue_jobs(self, job, issue_time, quantum_time=None):
         r"""
         transit jobs with PENDING state to RUNNING state
         :param job:
@@ -98,8 +99,27 @@ class JobEvents:
         job['state'] = 'RUNNING'
         self.running_jobs.append(job['jid'])
         job['start_time'] = issue_time
-        job['end_time'] = issue_time + job['running_time']
-        job['pending_time'] = job['start_time'] - job['submit_time']
+        if quantum_time is None:
+            job['running_time'] = int(job['running_time'] * (1 + job['penalty']))
+            job['end_time'] = issue_time + job['running_time']
+            job['pending_time'] = job['start_time'] - job['submit_time']
+
+        # For preemption/MFQ
+        else:
+            if 'start_time_list' not in job:
+                job['start_time_list'] = []
+                job['executed_time'] = 0
+                job['pending_time'] = job['start_time'] - job['submit_time']
+            else:
+                job['executed_time'] += (job['preempt_time'][-1] - job['start_time_list'][-1])
+                job['pending_time'] += (issue_time - job['preempt_time'][-1])
+            if job['running_time'] - job['executed_time'] > quantum_time:
+                job['running_time'] += int(quantum_time * job['penalty'])
+            else:
+                job['running_time'] += int(job['penalty'] * (job['running_time'] - job['executed_time']))
+            job['start_time_list'].append(issue_time)
+            job['end_time'] = issue_time + job['running_time'] - job['executed_time']
+
         self.pending_jobs.remove(job['jid'])
         if 'partition' in job:
             if 'qid' in job:
@@ -113,19 +133,6 @@ class JobEvents:
                 self.pending_queue['all'].remove(job['jid'])
 
         self.print_verbose('time[{}]\tjob[{}] RUNNING'.format(issue_time, job['jid']))
-
-        # For preemption/MFQ
-        if 'qid' in job:
-            if 'start_time_list' not in job:
-                job['start_time_list'] = []
-                job['executed_time'] = 0
-                job['total_pending_time'] = job['pending_time']
-            else:
-                job['executed_time'] += (job['preempt_time'][-1] - job['start_time_list'][-1])
-                job['total_pending_time'] += (issue_time - job['preempt_time'][-1])
-            job['start_time_list'].append(issue_time)
-            job['end_time'] -= job['executed_time']
-            job['pending_time'] = job['total_pending_time']
 
     def finish_jobs(self, state, job):
         if type(job) != dict:

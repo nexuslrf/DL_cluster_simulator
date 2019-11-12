@@ -22,7 +22,7 @@ Json format:
 """
 
 
-def event_log(logger, event_time, jobs, track_nodes=False):
+def event_log(logger, event_time, jobs, cluster, track_nodes=False):
     r"""
     :param event_time:
     :param logger: list of dict
@@ -34,6 +34,7 @@ def event_log(logger, event_time, jobs, track_nodes=False):
     event['time'] = event_time
     event['p_jobs'] = copy.deepcopy(jobs.pending_jobs)
     event['r_jobs'] = copy.deepcopy(jobs.running_jobs)
+    event['f_node'] = cluster.free_node
 
     if track_nodes:
         used_nodes = dict()

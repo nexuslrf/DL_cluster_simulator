@@ -1,5 +1,63 @@
 from cluster_vis import event_log
 
+def no_preempt_sim(cluster, jobs, logger=None, policy='first-fit', fit_first=True, sched='fifo', migration=False,
+                   **kwargs):
+    r"""
+        FIFO scheduling baseline
+        :param policy:
+        :param logger:
+        :param cluster:
+        :param jobs:
+        :return:
+        """
+    while jobs.PC < len(jobs.events):
+        if jobs.check_overload():
+            # cluster out of usage
+            print("This cluster is not large enough to run the job")
+            break
+
+        event = jobs.events[jobs.PC]
+        event_time = event['time']
+        if 'end_jobs' in event:
+            for jid in event['end_jobs']:
+                job = jobs.submit_jobs[jid]
+                if cluster.release_job_res(job):
+                    jobs.finish_jobs('COMPLETED', job)
+                else:
+                    jobs.finish_jobs('ERROR', job)
+
+        if 'start_jobs' in event:
+            for jid in event['start_jobs']:
+                job = jobs.submit_jobs[jid]
+                jobs.pend_jobs(job)
+
+        # We can start jobs!
+        issuing_jobs = []
+        for par, queue in jobs.pending_queue.items():
+            if sched == 'sjf':
+                queue.sort(key=lambda jid: jobs.submit_jobs[jid]['running_time'])
+            elif sched == 'lsf':
+                queue.sort(key=lambda jid: jobs.submit_jobs[jid]['num_gpu'])
+
+            for jid in queue:
+                job = jobs.submit_jobs[jid]
+                if cluster.try_alloc_res(job, policy=policy):
+                    issuing_jobs.append(jid)
+                elif not fit_first:
+                    break
+
+        for jid in issuing_jobs:
+            job = jobs.submit_jobs[jid]
+            jobs.issue_jobs(job, event_time)
+            jobs.add_event(job, job['end_time'], 'end_jobs')
+
+        jobs.PC += 1
+        print(f"time[{event_time}] ", end='')
+        cluster.report()
+        print(f"time[{event_time}] ", end='')
+        jobs.report()
+        if logger is not None:
+            event_log(logger, event_time, jobs, cluster)
 
 def fifo_sim(cluster, jobs, logger=None, policy='first-fit', fit_first=True, **kwargs):
     r"""
@@ -10,49 +68,7 @@ def fifo_sim(cluster, jobs, logger=None, policy='first-fit', fit_first=True, **k
     :param jobs:
     :return:
     """
-    while jobs.PC < len(jobs.events):
-        if jobs.check_overload():
-            # cluster out of usage
-            print("This cluster is not large enough to run the job")
-            break
-
-        event = jobs.events[jobs.PC]
-        event_time = event['time']
-        if 'end_jobs' in event:
-            for jid in event['end_jobs']:
-                job = jobs.submit_jobs[jid]
-                if cluster.release_job_res(job):
-                    jobs.finish_jobs('COMPLETED', job)
-                else:
-                    jobs.finish_jobs('ERROR', job)
-
-        if 'start_jobs' in event:
-            for jid in event['start_jobs']:
-                job = jobs.submit_jobs[jid]
-                jobs.pend_jobs(job)
-
-        # We can start jobs!
-        issuing_jobs = []
-        for par, queue in jobs.pending_queue.items():
-            for jid in queue:
-                job = jobs.submit_jobs[jid]
-                if cluster.try_alloc_res(job, policy=policy):
-                    issuing_jobs.append(jid)
-                elif not fit_first:
-                    break
-
-        for jid in issuing_jobs:
-            job = jobs.submit_jobs[jid]
-            jobs.issue_jobs(job, event_time)
-            jobs.add_event(job, job['end_time'], 'end_jobs')
-
-        jobs.PC += 1
-        print(f"time[{event_time}] ", end='')
-        cluster.report()
-        print(f"time[{event_time}] ", end='')
-        jobs.report()
-        if logger is not None:
-            event_log(logger, event_time, jobs)
+    no_preempt_sim(cluster, jobs, logger=logger, policy=policy, fit_first=fit_first, sched='fifo', **kwargs)
 
 
 def sjf_sim(cluster, jobs, logger=None, policy='first-fit', fit_first=True, **kwargs):
@@ -63,50 +79,7 @@ def sjf_sim(cluster, jobs, logger=None, policy='first-fit', fit_first=True, **kw
     :param jobs:
     :return:
     """
-    while jobs.PC < len(jobs.events):
-        if jobs.check_overload():
-            # cluster out of usage
-            print("This cluster is not large enough to run the job")
-            break
-
-        event = jobs.events[jobs.PC]
-        event_time = event['time']
-        if 'end_jobs' in event:
-            for jid in event['end_jobs']:
-                job = jobs.submit_jobs[jid]
-                if cluster.release_job_res(job):
-                    jobs.finish_jobs('COMPLETED', job)
-                else:
-                    jobs.finish_jobs('ERROR', job)
-
-        if 'start_jobs' in event:
-            for jid in event['start_jobs']:
-                job = jobs.submit_jobs[jid]
-                jobs.pend_jobs(job)
-
-        # We can start jobs!
-        issuing_jobs = []
-        for par, queue in jobs.pending_queue.items():
-            queue.sort(key=lambda jid: jobs.submit_jobs[jid]['running_time'])
-            for jid in queue:
-                job = jobs.submit_jobs[jid]
-                if cluster.try_alloc_res(job, policy=policy):
-                    issuing_jobs.append(jid)
-                elif not fit_first:
-                    break
-
-        for jid in issuing_jobs:
-            job = jobs.submit_jobs[jid]
-            jobs.issue_jobs(job, event_time)
-            jobs.add_event(job, job['end_time'], 'end_jobs')
-
-        jobs.PC += 1
-        print(f"time[{event_time}] ", end='')
-        cluster.report()
-        print(f"time[{event_time}] ", end='')
-        jobs.report()
-        if logger is not None:
-            event_log(logger, event_time, jobs)
+    no_preempt_sim(cluster, jobs, logger=logger, policy=policy, fit_first=fit_first, sched='sjf', **kwargs)
 
 
 def lsf_sim(cluster, jobs, logger=None, policy='first-fit', fit_first=True, **kwargs):
@@ -119,108 +92,7 @@ def lsf_sim(cluster, jobs, logger=None, policy='first-fit', fit_first=True, **kw
     :param jobs:
     :return:
     """
-    while jobs.PC < len(jobs.events):
-        if jobs.check_overload():
-            # cluster out of usage
-            print("This cluster is not large enough to run the job")
-            break
-
-        event = jobs.events[jobs.PC]
-        event_time = event['time']
-        if 'end_jobs' in event:
-            for jid in event['end_jobs']:
-                job = jobs.submit_jobs[jid]
-                if cluster.release_job_res(job):
-                    jobs.finish_jobs('COMPLETED', job)
-                else:
-                    jobs.finish_jobs('ERROR', job)
-
-        if 'start_jobs' in event:
-            for jid in event['start_jobs']:
-                job = jobs.submit_jobs[jid]
-                jobs.pend_jobs(job)
-
-        # Sort pending queue
-        # We can start jobs!
-        issuing_jobs = []
-        for par, queue in jobs.pending_queue.items():
-            queue.sort(key=lambda jid: jobs.submit_jobs[jid]['num_gpu'])
-            for jid in queue:
-                job = jobs.submit_jobs[jid]
-                if cluster.try_alloc_res(job, policy=policy):
-                    issuing_jobs.append(jid)
-                elif not fit_first:
-                    break
-
-        for jid in issuing_jobs:
-            job = jobs.submit_jobs[jid]
-            jobs.issue_jobs(job, event_time)
-            jobs.add_event(job, job['end_time'], 'end_jobs')
-
-        jobs.PC += 1
-        print(f"time[{event_time}] ", end='')
-        cluster.report()
-        print(f"time[{event_time}] ", end='')
-        jobs.report()
-        if logger is not None:
-            event_log(logger, event_time, jobs)
-
-
-# def lpf_sim(cluster, jobs, logger=None, policy='first-fit', fit_first=True):
-#     r"""
-#     Longest pending first scheduling baseline
-#     :param fit_first:
-#     :param policy:
-#     :param logger:
-#     :param cluster:
-#     :param jobs:
-#     :return:
-#     """
-#     while jobs.PC < len(jobs.events):
-#         if jobs.check_overload():
-#             # cluster out of usage
-#             print("This cluster is not large enough to run the job")
-#             break
-#
-#         event = jobs.events[jobs.PC]
-#         event_time = event['time']
-#         if 'end_jobs' in event:
-#             for jid in event['end_jobs']:
-#                 job = jobs.submit_jobs[jid]
-#                 if cluster.release_job_res(job):
-#                     jobs.finish_jobs('COMPLETED', job)
-#                 else:
-#                     jobs.finish_jobs('ERROR', job)
-#
-#         if 'start_jobs' in event:
-#             for jid in event['start_jobs']:
-#                 job = jobs.submit_jobs[jid]
-#                 jobs.pend_jobs(job)
-#
-#         # Sort pending queue
-#         # We can start jobs!
-#         issuing_jobs = []
-#         for par, queue in jobs.pending_queue.items():
-#             queue.sort(key=lambda jid: jobs.submit_jobs[jid]['submit_time'])
-#             for jid in queue:
-#                 job = jobs.submit_jobs[jid]
-#                 if cluster.try_alloc_res(job, policy=policy):
-#                     issuing_jobs.append(jid)
-#                 elif not fit_first:
-#                     break
-#
-#         for jid in issuing_jobs:
-#             job = jobs.submit_jobs[jid]
-#             jobs.issue_jobs(job, event_time)
-#             jobs.add_event(job, job['end_time'], 'end_jobs')
-#
-#         jobs.PC += 1
-#         print(f"time[{event_time}] ", end='')
-#         cluster.report()
-#         print(f"time[{event_time}] ", end='')
-#         jobs.report()
-#         if logger is not None:
-#             event_log(logger, event_time, jobs)
+    no_preempt_sim(cluster, jobs, logger=logger, policy=policy, fit_first=fit_first, sched='lsf', **kwargs)
 
 
 def dlas_sim(cluster, jobs, logger=None, policy='first-fit', fit_first=True,
@@ -304,12 +176,13 @@ def dlas_sim(cluster, jobs, logger=None, policy='first-fit', fit_first=True,
 
         for jid in issuing_jobs:
             job = jobs.submit_jobs[jid]
-            jobs.issue_jobs(job, event_time)
             par = 'all' if 'partition' not in job else job['partition']
             if gputime:
-                preempt_time = queue_lim[par][job['qid']]//job['num_gpu'] + event_time
+                quantum_time = queue_lim[par][job['qid']]//job['num_gpu']
             else:
-                preempt_time = queue_lim[par][job['qid']] + event_time
+                quantum_time = queue_lim[par][job['qid']]
+            jobs.issue_jobs(job, event_time, quantum_time)
+            preempt_time = event_time + quantum_time
             if preempt_time < job['end_time']:
                 jobs.add_event(job, preempt_time, 'preempt_jobs')
             else:
@@ -320,7 +193,7 @@ def dlas_sim(cluster, jobs, logger=None, policy='first-fit', fit_first=True,
         print(f"time[{event_time}] ", end='')
         jobs.report()
         if logger is not None:
-            event_log(logger, event_time, jobs)
+            event_log(logger, event_time, jobs, cluster)
 
         # deformat the pending_queue
     jobs.release_multilevel_queue()
