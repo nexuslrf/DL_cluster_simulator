@@ -1,3 +1,4 @@
+GPU_PER_NODE = 8
 from cluster_vis import event_log
 
 def no_preempt_sim(cluster, jobs, logger=None, policy='first-fit', fit_first=True, sched='fifo', migration=False,
@@ -25,6 +26,19 @@ def no_preempt_sim(cluster, jobs, logger=None, policy='first-fit', fit_first=Tru
                     jobs.finish_jobs('COMPLETED', job)
                 else:
                     jobs.finish_jobs('ERROR', job)
+            if migration:  # migrate jobs with less gpu_p_node
+                jobs.running_jobs.sort(key=lambda jid: jobs.submit_jobs[jid]['num_node']*100 +
+                                                       jobs.submit_jobs[jid]['num_gpu_p_node'])
+                for jid in jobs.running_jobs:
+                    job = jobs.submit_jobs[jid]
+                    if job['num_gpu_p_node'] >= GPU_PER_NODE//2:
+                        break
+                    if cluster.try_better_alloc(job, policy):
+                        if 'start_time_list' not in job:
+                            job['start_time_list'] = [job['start_time']]
+                            job['preempt_time'] = []
+                        job['preempt_time'].append(event_time)
+                        job['start_time_list'].append(event_time)
 
         if 'start_jobs' in event:
             for jid in event['start_jobs']:

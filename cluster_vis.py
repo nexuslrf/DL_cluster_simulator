@@ -35,7 +35,7 @@ def event_log(logger, event_time, jobs, cluster, track_nodes=False):
     event['p_jobs'] = copy.deepcopy(jobs.pending_jobs)
     event['r_jobs'] = copy.deepcopy(jobs.running_jobs)
     event['f_node'] = cluster.free_node
-
+    event['f_gpu'] = cluster.free_gpus
     if track_nodes:
         used_nodes = dict()
         for jid in jobs.running_jobs:
@@ -72,12 +72,14 @@ def cluster_visualization(cluster, logger, trace, d=4, fig_w=12, node_h=15, node
     # fig, ax = plt.subplots(1, 1, figsize=(fig_w, fig_w / node_w / d * node_h * h), dpi=80)
     fig = plt.figure(figsize=(fig_w * 1.5, fig_w / node_w / d * node_h * h * 1.2), dpi=80, constrained_layout=True)
     fig.suptitle("Deep Learning Cluster Simulation -- {} Schedule".format(schedule))
-    gs = fig.add_gridspec(2, 3)
+    gs = fig.add_gridspec(3, 3)
     ax = fig.add_subplot(gs[:, :-1])
     ax.set_title('Monitor')
-    ax_pending = fig.add_subplot(gs[0, -1])
+    ax_usage = fig.add_subplot(gs[0, -1])
+    ax_usage.set_title('Res Usage: #UsedGPU/#UsedNode')
+    ax_pending = fig.add_subplot(gs[1, -1])
     ax_pending.set_title('#Pending Jobs')
-    ax_running = fig.add_subplot(gs[1, -1])
+    ax_running = fig.add_subplot(gs[2, -1])
     ax_running.set_title('#Running Jobs')
 
     plt.subplots_adjust(left=0.15, bottom=0.20, )
@@ -107,9 +109,12 @@ def cluster_visualization(cluster, logger, trace, d=4, fig_w=12, node_h=15, node
     timeline = [v['time'] for v in logger]
     num_pending = [len(v['p_jobs']) for v in logger]
     num_running = [len(v['r_jobs']) for v in logger]
+    res_usage = [(cluster.num_gpu - v['f_gpu']) / (cluster.num_node - v['f_node'] + 0.01)
+                 for v in logger]
 
     ax_pending.plot(num_pending[:])
     ax_running.plot(num_running[:])
+    ax_usage.plot(res_usage[:])
 
     row = 0
     par_n = 0
@@ -212,7 +217,7 @@ def cluster_visualization(cluster, logger, trace, d=4, fig_w=12, node_h=15, node
                         old_nodes = list(j_node_map[j] - new_j_node_map[j])
                         for nn, on in zip(new_nodes, old_nodes):
                             arc = ax.annotate("", xy=node_pos[nn], xytext=node_pos[on],
-                                              arrowprops=dict(arrowstyle="->", color=cmap(j % cmap.N), alpha=0.8,
+                                              arrowprops=dict(arrowstyle="->", color=cmap(j % cmap.N), alpha=0.8, lw=3,
                                                               shrinkA=5, shrinkB=5,
                                                               patchA=None, patchB=None,
                                                               connectionstyle="arc3,rad=0.3",
@@ -233,8 +238,11 @@ def cluster_visualization(cluster, logger, trace, d=4, fig_w=12, node_h=15, node
             ax_pending.plot(num_pending[:idx + 1])
             ax_running.cla()
             ax_running.plot(num_running[:idx + 1])
+            ax_usage.cla()
+            ax_usage.plot(res_usage[:idx + 1])
             ax_pending.set_title('#Pending Jobs')
             ax_running.set_title('#Running Jobs')
+            ax_usage.set_title('Res Usage: #UsedGPU/#UsedNode')
             ax_running.set_xlabel('Event_Idx')
 
         fig.canvas.draw_idle()

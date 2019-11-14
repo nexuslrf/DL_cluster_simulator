@@ -40,7 +40,8 @@ def main():
     jobs.init_events_from_jobs()
     # Start sim
     scheduling.__dict__[f'{args.schedule}_sim'](cluster, jobs, logger, policy=args.placement_policy,
-                                                fit_first=args.fifo_queue, gputime=args.cputime)
+                                                fit_first=args.fifo_queue, gputime=args.cputime,
+                                                migration=args.migration)
 
     print('{} Average Waiting Time: {}'.format(args.schedule, avg_pending_time(jobs.submit_jobs)))
     print('{} Average Job Completion Time: {}'.format(args.schedule, avg_job_completion_time(jobs.submit_jobs)))
