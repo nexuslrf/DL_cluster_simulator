@@ -63,7 +63,7 @@ def get_alloced_nodes(job_placements, time):
 
 
 def cluster_visualization(cluster, logger, trace, d=4, fig_w=12, node_h=15, node_w=16, schedule='fifo', save='',
-                          frames=None, draw_mitigate=True):
+                          frames=None, draw_migration=True, anonymous=False):
     r = d / 2
     l = d / 4
     border = d / 20
@@ -169,7 +169,13 @@ def cluster_visualization(cluster, logger, trace, d=4, fig_w=12, node_h=15, node
         ax.plot([0, node_w * d], [row * h, row * h], 'b--')
         par_n += 1
     ax.set_yticks(ticks)
-    ax.set_yticklabels(cluster.partitions.keys())
+    if anonymous:
+        yticklabels = []
+        for i in range(len(cluster.partitions.keys())):
+            yticklabels.append(f'Partition {i+1:2d}')
+        ax.set_yticklabels(yticklabels)
+    else:
+        ax.set_yticklabels(cluster.partitions.keys())
     fig.canvas.draw_idle()
 
     axcolor = 'lightgoldenrodyellow'
@@ -199,7 +205,7 @@ def cluster_visualization(cluster, logger, trace, d=4, fig_w=12, node_h=15, node
             event_idx_slider.set_val(idx)
             new_gpus = []
             new_j_node_map = dict()
-            if draw_mitigate:
+            if draw_migration:
                 while len(links) > 0:
                     arc = links.pop()
                     arc.remove()
@@ -211,7 +217,7 @@ def cluster_visualization(cluster, logger, trace, d=4, fig_w=12, node_h=15, node
                 for g in j_gpu:
                     gpu_j_map[g] = j
                     new_j_node_map[j].add(g[:-2])
-                if draw_mitigate:
+                if draw_migration:
                     if j in j_node_map:
                         new_nodes = list(new_j_node_map[j] - j_node_map[j])
                         old_nodes = list(j_node_map[j] - new_j_node_map[j])
@@ -320,4 +326,4 @@ if __name__ == '__main__':
     cluster = Cluster()
     cluster.init_from_csv('Cluster_Info/cluster_info.csv')
     partition = Partition(cluster, 'Cluster_Info/sinfo.csv')
-    cluster_visualization(cluster, args.logger_file, args.chrome_trace_file)
+    cluster_visualization(cluster, args.logger_file, args.chrome_trace_file, anonymous=True)

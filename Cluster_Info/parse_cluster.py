@@ -99,7 +99,7 @@ def get_rgb(x, vmin=0, vmax=10):
     return matplotlib.colors.rgb2hex(cm.get_cmap(CMAP, vmax-vmin+1)(norm(x))[:3])
 
 
-def draw_topo(nodes, switches, partitions=None):
+def draw_topo(nodes, switches, partitions=None, anonymous=False):
     plt.figure(dpi=60, figsize=(16, 12))
     B = nx.Graph()
     # Add nodes with the node attribute "bipartite"
@@ -125,13 +125,16 @@ def draw_topo(nodes, switches, partitions=None):
     #
     node_par = dict()
     par_id = dict()
-    par_tick = ['L1 SW', 'L2 SW']
+    par_tick = ['L1 Switch', 'L2 Switch']
     cnt = 0
     if partitions is not None:
         for k, v in partitions.items():
             par_id[k] = cnt
             cnt+=1
-            par_tick.append(k)
+            if not anonymous:
+                par_tick.append(k)
+            else:
+                par_tick.append(f'Partition{cnt:2d}')
             for n in v:
                 node_par[n] = k
     par_tick.append('Others')
@@ -166,14 +169,14 @@ def draw_topo(nodes, switches, partitions=None):
     cmap = matplotlib.colors.ListedColormap(['b', 'y'] + cc_color)
     norm = matplotlib.colors.BoundaryNorm(np.arange(-0.5, cnt + 3, 1), cmap.N)
 
-    nx.draw(B, pos, node_color=colors, with_labels=True, alpha=0.8, size=300, cmap=cmap, norm=norm)
+    nx.draw(B, pos, node_color=colors, with_labels=True, alpha=0.8, node_size=600, cmap=cmap, norm=norm, font_size=14)
     # pc = matplotlib.collections.PatchCollection(edges, cmap=cmap)
     # pc.set_array(colors)
     cb = plt.colorbar(cm.ScalarMappable(norm=norm, cmap=cmap),  shrink=0.8)
     tick_locator = ticker.MaxNLocator(nbins=len(par_tick))
     cb.locator = tick_locator
     cb.update_ticks()
-    cb.ax.set_yticklabels(par_tick)
+    cb.ax.set_yticklabels(par_tick, size='14')
     plt.draw()
     plt.show()
 
@@ -192,5 +195,5 @@ def generate_csv(nodes, nodes_info=None):
 if __name__ == '__main__':
     nds, sws = parse_ib()
     ninfo, pars = parse_sinfo()
-    draw_topo(nds, sws, pars)
-    generate_csv(nds, ninfo)
+    draw_topo(nds, sws, pars, anonymous=True)
+    # generate_csv(nds, ninfo)
