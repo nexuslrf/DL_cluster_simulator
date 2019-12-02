@@ -2,7 +2,7 @@ import csv
 
 num_cpu_p_node = 4
 penalty = 0.0
-penalty_free_gpu = 0.0
+penalty_free_gpu = 0.2
 x_cnt = 0
 """
 cluster class: to represent the cluster info

@@ -1,9 +1,9 @@
 import argparse
 
 parser = argparse.ArgumentParser(description='Deep Learning Cluster Monitor')
-schedule = 'fifo'
-policy = 'best-fit'
-penalty = ''
+schedule = 'dlas'
+policy = 'free-gpu'
+penalty = '0.2'
 parser.add_argument('--mode', default='nmsl', type=str)
 parser.add_argument('--cluster_info', default='Cluster_Info/cluster_info.csv', type=str)
 parser.add_argument('--job_trace', default='Trace_Collector/jobs.csv', type=str)

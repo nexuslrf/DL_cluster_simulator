@@ -34,6 +34,7 @@ def no_preempt_sim(cluster, jobs, logger=None, policy='first-fit', fit_first=Tru
                     if job['num_gpu_p_node'] >= GPU_PER_NODE//2:
                         break
                     if cluster.try_better_alloc(job, policy):
+                        job['running_time'] += 8
                         if 'start_time_list' not in job:
                             job['start_time_list'] = [job['start_time']]
                             job['preempt_time'] = []
