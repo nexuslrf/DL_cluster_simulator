@@ -1,4 +1,5 @@
 *.csv
+*.json
 /Trace_Collector/Task_Trace.ipynb
 /Cluster_Info/iblinkinfo.txt
 __pycache__
